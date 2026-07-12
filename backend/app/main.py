@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-app = FastAPI(title="RepoFix AI")
+app = FastAPI(title="RepoPilot")
 
 
 @app.get("/health")

@@ -1,29 +1,13 @@
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
-from app.core.config import get_settings
-from app.db.base import Base
 from app.models import CodeChunk, Repository, SourceFile
 from app.services.database_writer import DatabaseWriteError, DatabaseWriter
 from app.services.python_parser import ParsedCodeChunk
 from app.services.repository_indexer import IndexedSourceFile, RepositoryIndexResult
-
-
-@pytest.fixture()
-def db_session_factory() -> sessionmaker[Session]:
-    engine = create_engine(get_settings().database_url, pool_pre_ping=True)
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
-    SessionFactory = sessionmaker(bind=engine, expire_on_commit=False)
-
-    yield SessionFactory
-
-    Base.metadata.drop_all(engine)
-    engine.dispose()
-
 
 def make_chunk(
     *,

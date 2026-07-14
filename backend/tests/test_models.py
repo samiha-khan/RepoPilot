@@ -1,25 +1,9 @@
 import pytest
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
-from app.db.base import Base
 from app.models import CodeChunk, Repository, SourceFile
-
-
-@pytest.fixture()
-def db_session() -> Session:
-    engine = create_engine(get_settings().database_url, pool_pre_ping=True)
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
-
-    with SessionLocal() as session:
-        yield session
-
-    Base.metadata.drop_all(engine)
-    engine.dispose()
 
 
 def make_repository(owner: str = "octocat", name: str = "hello-world") -> Repository:

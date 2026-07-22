@@ -18,3 +18,14 @@ def test_settings_keeps_psycopg_database_url_unchanged() -> None:
     settings = Settings(database_url=database_url)
 
     assert settings.database_url == database_url
+
+
+def test_settings_default_cors_origins_include_local_and_production_frontends() -> None:
+    settings = Settings()
+
+    assert settings.allowed_cors_origins == [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://repo-pilot-okaku0jzj-skportfolio.vercel.app",
+        "https://repo-pilot-sable.vercel.app",
+    ]

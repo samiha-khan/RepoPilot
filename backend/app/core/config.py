@@ -7,7 +7,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_env: str = "local"
     database_url: str = "postgresql+psycopg://repofix:repofix@db:5432/repofix"
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origins: str = (
+        "http://localhost:5173,"
+        "http://127.0.0.1:5173,"
+        "https://repo-pilot-okaku0jzj-skportfolio.vercel.app,"
+        "https://repo-pilot-sable.vercel.app"
+    )
 
     @field_validator("database_url", mode="before")
     @classmethod

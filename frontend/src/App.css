@@ -95,6 +95,14 @@ input:focus {
   align-items: end;
 }
 
+.index-form {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: end;
+}
+
 button {
   min-height: 44px;
   border: 0;
@@ -250,6 +258,14 @@ code {
   color: #9f2d2d;
 }
 
+.status.success {
+  margin: 16px 0;
+  border: 1px solid #b9dfce;
+  border-radius: 8px;
+  background: #f0fbf6;
+  color: #236247;
+}
+
 @media (max-width: 840px) {
   .app-shell {
     width: min(100% - 24px, 1180px);
@@ -257,11 +273,13 @@ code {
   }
 
   .controls,
+  .index-form,
   .search-form,
   .content-grid {
     grid-template-columns: 1fr;
   }
 
+  .index-form button,
   .search-form button {
     width: 100%;
   }

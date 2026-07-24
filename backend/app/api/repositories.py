@@ -6,12 +6,42 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.repository import (
     CodeSearchResultResponse,
+    RepositoryIndexRequest,
+    RepositoryIndexResponse,
     RepositoryResponse,
     SourceFileResponse,
+)
+from app.services.public_repository_indexer import (
+    InvalidPublicRepositoryUrlError,
+    PublicRepositoryIndexError,
+    RepositoryArchiveNotFoundError,
+    RepositoryArchiveTooLargeError,
+    index_public_github_repository,
 )
 from app.services import repository_queries
 
 router = APIRouter()
+
+
+@router.post("/repositories/index", response_model=RepositoryIndexResponse)
+def index_repository(request: RepositoryIndexRequest) -> RepositoryIndexResponse:
+    try:
+        summary = index_public_github_repository(request.url)
+    except InvalidPublicRepositoryUrlError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RepositoryArchiveNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RepositoryArchiveTooLargeError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except PublicRepositoryIndexError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return RepositoryIndexResponse(
+        repository=summary.repository,
+        total_files=summary.total_files,
+        total_chunks=summary.total_chunks,
+        skipped_files=summary.skipped_files,
+    )
 
 
 @router.get("/repositories", response_model=list[RepositoryResponse])

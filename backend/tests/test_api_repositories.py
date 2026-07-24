@@ -5,6 +5,10 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.main import app
 from app.models import CodeChunk, Repository, SourceFile
+from app.services.public_repository_indexer import (
+    InvalidPublicRepositoryUrlError,
+    PublicRepositoryIndexSummary,
+)
 
 
 @pytest.fixture()
@@ -110,6 +114,65 @@ def test_list_repositories_returns_indexed_repositories(
     }
     assert data[0]["created_at"]
     assert data[0]["updated_at"]
+
+
+def test_index_repository_returns_index_summary(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = make_repository(db_session, owner="octocat", name="demo")
+
+    def index_public_github_repository_stub(url: str) -> PublicRepositoryIndexSummary:
+        assert url == "https://github.com/octocat/demo"
+        return PublicRepositoryIndexSummary(
+            repository=repository,
+            total_files=1,
+            total_chunks=2,
+            skipped_files=0,
+        )
+
+    monkeypatch.setattr(
+        "app.api.repositories.index_public_github_repository",
+        index_public_github_repository_stub,
+    )
+
+    response = client.post(
+        "/repositories/index",
+        json={"url": "https://github.com/octocat/demo"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["repository"]["id"] == repository.id
+    assert data["repository"]["owner"] == "octocat"
+    assert data["repository"]["name"] == "demo"
+    assert data["total_files"] == 1
+    assert data["total_chunks"] == 2
+    assert data["skipped_files"] == 0
+
+
+def test_index_repository_returns_422_for_invalid_github_url(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def index_public_github_repository_stub(url: str) -> PublicRepositoryIndexSummary:
+        raise InvalidPublicRepositoryUrlError("Repository URL must be an HTTPS GitHub URL.")
+
+    monkeypatch.setattr(
+        "app.api.repositories.index_public_github_repository",
+        index_public_github_repository_stub,
+    )
+
+    response = client.post(
+        "/repositories/index",
+        json={"url": "https://example.com/octocat/demo"},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Repository URL must be an HTTPS GitHub URL.",
+    }
 
 
 def test_get_repository_returns_details(client: TestClient, db_session: Session) -> None:

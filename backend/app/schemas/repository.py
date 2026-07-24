@@ -35,3 +35,14 @@ class CodeSearchResultResponse(BaseModel):
     end_line: int
     docstring: str | None
     source_code: str
+
+
+class RepositoryIndexRequest(BaseModel):
+    url: str
+
+
+class RepositoryIndexResponse(BaseModel):
+    repository: RepositoryResponse
+    total_files: int
+    total_chunks: int
+    skipped_files: int

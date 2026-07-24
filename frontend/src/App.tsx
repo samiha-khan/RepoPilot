@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import "./App.css";
 
@@ -22,16 +22,30 @@ type SearchResult = {
   source_code: string;
 };
 
+type IndexResponse = {
+  repository: Repository;
+  total_files: number;
+  total_chunks: number;
+  skipped_files: number;
+};
+
 const apiUrl = (import.meta.env.VITE_API_URL ?? "http://localhost:8000").replace(
   /\/$/,
   "",
 );
 
-async function fetchJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiUrl}${path}`);
+async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(`${apiUrl}${path}`, options);
 
   if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}`);
+    let message = `Request failed with status ${response.status}`;
+    try {
+      const errorBody = (await response.json()) as { detail?: string };
+      message = errorBody.detail ?? message;
+    } catch {
+      // Keep the generic status message when the API does not return JSON.
+    }
+    throw new Error(message);
   }
 
   return response.json() as Promise<T>;
@@ -45,6 +59,9 @@ function App() {
   const [selectedResult, setSelectedResult] = useState<SearchResult | null>(null);
   const [repositoriesLoading, setRepositoriesLoading] = useState(true);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [repositoryUrl, setRepositoryUrl] = useState("");
+  const [indexLoading, setIndexLoading] = useState(false);
+  const [indexMessage, setIndexMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
 
@@ -59,10 +76,13 @@ function App() {
   const canSearch =
     selectedRepositoryId.length > 0 && query.trim().length > 0 && !searchLoading;
 
-  useEffect(() => {
-    let isActive = true;
+  const canIndex = repositoryUrl.trim().length > 0 && !indexLoading;
 
-    async function loadRepositories() {
+  const loadRepositories = useCallback(
+    async (
+      preferredRepositoryId?: number,
+      shouldApply: () => boolean = () => true,
+    ) => {
       setRepositoriesLoading(true);
       setError(null);
 
@@ -70,16 +90,24 @@ function App() {
         const loadedRepositories =
           await fetchJson<Repository[]>("/repositories");
 
-        if (!isActive) {
+        if (!shouldApply()) {
           return;
         }
 
         setRepositories(loadedRepositories);
-        if (loadedRepositories.length > 0) {
-          setSelectedRepositoryId(String(loadedRepositories[0].id));
+        if (loadedRepositories.length === 0) {
+          setSelectedRepositoryId("");
+          return;
         }
+
+        const preferredRepository = loadedRepositories.find(
+          (repository) => repository.id === preferredRepositoryId,
+        );
+        setSelectedRepositoryId(
+          String(preferredRepository?.id ?? loadedRepositories[0].id),
+        );
       } catch (loadError) {
-        if (isActive) {
+        if (shouldApply()) {
           setError(
             loadError instanceof Error
               ? loadError.message
@@ -87,18 +115,63 @@ function App() {
           );
         }
       } finally {
-        if (isActive) {
+        if (shouldApply()) {
           setRepositoriesLoading(false);
         }
       }
-    }
+    },
+    [],
+  );
 
-    void loadRepositories();
+  useEffect(() => {
+    let isActive = true;
+
+    void loadRepositories(undefined, () => isActive);
 
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [loadRepositories]);
+
+  async function handleIndexRepository(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!canIndex) {
+      return;
+    }
+
+    setIndexLoading(true);
+    setIndexMessage(null);
+    setError(null);
+
+    try {
+      const indexResult = await fetchJson<IndexResponse>("/repositories/index", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url: repositoryUrl.trim() }),
+      });
+
+      setRepositoryUrl("");
+      setResults([]);
+      setSelectedResult(null);
+      setHasSearched(false);
+      setIndexMessage(
+        `Indexed ${indexResult.repository.owner}/${indexResult.repository.name}: ${indexResult.total_files} Python files, ${indexResult.total_chunks} code chunks.`,
+      );
+      await loadRepositories(indexResult.repository.id);
+    } catch (indexError) {
+      setIndexMessage(null);
+      setError(
+        indexError instanceof Error
+          ? indexError.message
+          : "Unable to index repository.",
+      );
+    } finally {
+      setIndexLoading(false);
+    }
+  }
 
   async function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -146,6 +219,21 @@ function App() {
       </header>
 
       <section className="controls" aria-label="Repository search controls">
+        <form className="index-form" onSubmit={handleIndexRepository}>
+          <label className="field repository-url-field">
+            <span>Index a repository</span>
+            <input
+              type="url"
+              value={repositoryUrl}
+              onChange={(event) => setRepositoryUrl(event.target.value)}
+              placeholder="https://github.com/owner/repository"
+            />
+          </label>
+          <button type="submit" disabled={!canIndex}>
+            {indexLoading ? "Indexing..." : "Index"}
+          </button>
+        </form>
+
         <label className="field">
           <span>Repository</span>
           <select
@@ -186,6 +274,7 @@ function App() {
         </form>
       </section>
 
+      {indexMessage ? <div className="status success">{indexMessage}</div> : null}
       {selectedRepository ? (
         <section className="repository-summary">
           <span>{selectedRepository.url}</span>

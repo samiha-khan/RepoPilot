@@ -175,6 +175,27 @@ def test_index_repository_returns_422_for_invalid_github_url(
     }
 
 
+def test_index_repository_allows_production_cors_preflight(
+    client: TestClient,
+) -> None:
+    response = client.options(
+        "/repositories/index",
+        headers={
+            "Origin": "https://repo-pilot-sable.vercel.app",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+
+    assert response.status_code == 200
+    assert (
+        response.headers["access-control-allow-origin"]
+        == "https://repo-pilot-sable.vercel.app"
+    )
+    assert "POST" in response.headers["access-control-allow-methods"]
+    assert "OPTIONS" in response.headers["access-control-allow-methods"]
+
+
 def test_get_repository_returns_details(client: TestClient, db_session: Session) -> None:
     repository = make_repository(db_session)
 

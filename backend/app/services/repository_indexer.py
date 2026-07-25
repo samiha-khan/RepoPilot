@@ -1,9 +1,9 @@
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from app.services.python_parser import ParsedCodeChunk, PythonParseError, parse_file
-from app.services.repository_loader import RepositoryLoader
 
 EXCLUDED_DIRECTORIES = {
     ".git",
@@ -34,9 +34,14 @@ class RepositoryIndexResult:
     skipped_files: int
 
 
+class RepositoryLoaderProtocol(Protocol):
+    def load(self, source: str) -> Path:
+        pass
+
+
 class RepositoryIndexer:
-    def __init__(self, loader: RepositoryLoader | None = None) -> None:
-        self.loader = loader or RepositoryLoader()
+    def __init__(self, loader: RepositoryLoaderProtocol | None = None) -> None:
+        self.loader = loader or self._default_loader()
 
     def index(self, source: str) -> RepositoryIndexResult:
         repository_path = self.loader.load(source).resolve()
@@ -97,3 +102,8 @@ class RepositoryIndexer:
             return False
 
         return True
+
+    def _default_loader(self) -> RepositoryLoaderProtocol:
+        from app.services.repository_loader import RepositoryLoader
+
+        return RepositoryLoader()

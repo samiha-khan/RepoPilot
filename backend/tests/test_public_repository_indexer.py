@@ -1,4 +1,6 @@
 import io
+import subprocess
+import sys
 import zipfile
 from urllib.error import HTTPError
 
@@ -40,6 +42,25 @@ def make_archive(files: dict[str, str]) -> bytes:
         for path, content in files.items():
             archive.writestr(path, content)
     return archive_buffer.getvalue()
+
+
+def test_public_repository_indexer_import_does_not_import_git_loader() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; "
+                "import app.services.public_repository_indexer; "
+                "print('app.services.repository_loader' in sys.modules)"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.strip() == "False"
 
 
 def test_parse_public_github_repository_url_accepts_normal_github_url() -> None:

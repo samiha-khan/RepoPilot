@@ -3,6 +3,7 @@ from pathlib import Path
 
 from git import Repo
 
+from app.services import repository_indexer
 from app.services.repository_indexer import RepositoryIndexer
 
 
@@ -20,6 +21,24 @@ def write_file(path: Path, contents: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(contents, encoding="utf-8")
     return path
+
+
+def test_repository_indexer_module_does_not_import_default_git_loader() -> None:
+    assert "RepositoryLoader" not in repository_indexer.__dict__
+
+
+def test_repository_indexer_default_loader_is_loaded_lazily(monkeypatch) -> None:
+    class LazyRepositoryLoader:
+        pass
+
+    monkeypatch.setattr(
+        "app.services.repository_loader.RepositoryLoader",
+        LazyRepositoryLoader,
+    )
+
+    indexer = RepositoryIndexer()
+
+    assert isinstance(indexer.loader, LazyRepositoryLoader)
 
 
 def test_indexes_small_temporary_git_repository(tmp_path: Path) -> None:

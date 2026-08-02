@@ -11,6 +11,12 @@ The backend parses Python files with the standard `ast` module, stores repositor
 - Frontend: https://repo-pilot-sable.vercel.app
 - Backend API: https://aqueous-earth-43412-5f6428188142.herokuapp.com
 
+### Example
+
+![RepoPilot Demo](docs/repopilot-demo.png)
+
+*RepoPilot indexing a public GitHub repository and searching indexed Python code.*
+
 ## Features
 
 - Index public GitHub repositories from the web interface

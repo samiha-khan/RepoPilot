@@ -6,6 +6,31 @@ RepoPilot is a full-stack code search application for Python repositories. A use
 
 The backend parses Python files with the standard `ast` module, stores repositories, source files, and code chunks in PostgreSQL, and ranks search results with BM25-style scoring. Re-indexing the same repository refreshes the existing database record instead of creating duplicates.
 
+## Why
+
+`grep` and GitHub's own search match exact strings. If you don't already
+know a function is named `validate_user_session`, searching "check if
+someone's logged in" won't find it. RepoPilot indexes a repository's
+structure ahead of time (symbols, docstrings, file paths, source) so
+search can rank by relevance instead of requiring an exact string match.
+
+A few specific choices worth explaining:
+
+- **AST parsing over regex.** Regex-based symbol extraction breaks on
+  multi-line signatures, decorators, and nested functions. `ast` handles
+  all of that correctly because it's parsing the actual grammar, not
+  approximating it.
+- **BM25 over embeddings.** BM25 is precise, fast, and has no external
+  API dependency or vector index to maintain, which fits a tool meant to
+  index arbitrary public repos on demand. The tradeoff is BM25 matches
+  terms, not meaning, so a query and its target need to share vocabulary.
+  See `docs/search-evaluation.md` for where that tradeoff actually shows
+  up in practice.
+- **Postgres over re-parsing on every query.** Indexing is the expensive
+  step (downloading, parsing, walking the whole repo). Persisting the
+  result means search itself is cheap, and re-indexing an already-known
+  repository is a refresh, not a rebuild.
+
 ## Live demo
 
 - Frontend: https://repo-pilot-sable.vercel.app
@@ -229,6 +254,23 @@ Current backend test result:
 ```text
 100 passed
 ```
+
+## Search quality
+
+The BM25 ranker is covered by unit tests, but ranking *quality* (does the
+right result actually end up near the top) is measured separately: 18
+hand-written queries against the real search function, evaluated on
+RepoPilot's own indexed codebase.
+
+```
+Precision@1: 15/18 = 83.3%
+Precision@3: 18/18 = 100.0%
+MRR:         0.917
+```
+
+Full methodology, the two near-misses, and honest limitations of this
+evaluation are in [`docs/search-evaluation.md`](docs/search-evaluation.md).
+Run it yourself with `python backend/eval_search_quality.py`.
 
 ## Limitations
 

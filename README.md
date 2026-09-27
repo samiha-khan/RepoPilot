@@ -22,12 +22,14 @@ A few specific choices worth explaining:
   approximating it.
 - **Keyword and meaning, not keyword alone.** BM25 is precise when the
   query and the code share words. It misses questions whose wording never
-  appears in the symbol name, such as asking to save parsed symbols and
-  expecting `write()`. A local `bge-small` model embeds each chunk at
-  index time and the question at search time. The blend keeps an exact
-  symbol name first, then combines the keyword score with cosine
-  similarity. Embeddings are stored as JSON and scored in Python, so the
-  same ranker runs on SQLite and PostgreSQL. See
+  appears in the symbol name, such as asking how a camel case name is
+  split and expecting `_tokenize()`. A local
+  `jina-embeddings-v2-base-code` model embeds each chunk at index time
+  and the question at search time. It is trained on code as well as
+  English, and it runs on CPU with no external embedding API. The blend
+  keeps an exact symbol name first, then combines the keyword score with
+  cosine similarity. Embeddings are stored as JSON and scored in Python,
+  so the same ranker runs on SQLite and PostgreSQL. See
   `docs/search-evaluation.md` for the measured result.
 - **Postgres over re-parsing on every query.** Indexing is the expensive
   step (downloading, parsing, walking the whole repo). Persisting the
@@ -86,7 +88,7 @@ During indexing, RepoPilot walks Python files, skips common generated or depende
 
 The database stores repositories, source files, and code chunks as related records. When a repository is indexed again, the existing repository row is updated and its files and chunks are replaced with the latest indexed content.
 
-Search is scoped to one indexed repository at a time. Keyword search matches the query against symbol names, file paths, docstrings, and source code, then ranks those hits with BM25. Meaning search embeds the question and compares it with the vector stored on each chunk. An exact symbol name stays first. Otherwise the list is a blend of the two scores. Each hit records its keyword rank, its meaning rank, and a short explanation.
+Search is scoped to one indexed repository at a time. Keyword search matches the query against symbol names, file paths, docstrings, and source code, then ranks those hits with BM25. Meaning search embeds the question and compares it with the vector stored on each chunk. An exact symbol name stays first. After that, a meaning match outranks a keyword-only match, and keyword score breaks ties. Each hit records its keyword rank, its meaning rank, and a short explanation.
 
 ## Tech stack
 
@@ -99,7 +101,7 @@ Search is scoped to one indexed repository at a time. Keyword search matches the
 - psycopg
 - Typer
 - GitPython
-- fastembed (`BAAI/bge-small-en-v1.5`, local ONNX, no external embedding API)
+- fastembed (`jinaai/jina-embeddings-v2-base-code`, local ONNX)
 - pytest
 
 ### Frontend
@@ -257,20 +259,27 @@ docker compose exec backend python -m pytest tests
 Current backend test result:
 
 ```text
-100 passed
+103 passed
 ```
 
 ## Search quality
 
-Ranking quality is measured separately from the unit tests. The eval
-indexes this backend, then runs hand-written queries through keyword
-search, meaning search, and the blended list. Four of those questions
-use wording that does not appear in the expected symbol name.
+Ranking quality is measured on 22 hand-written queries against this
+backend. Four of those questions use wording that does not appear in the
+expected symbol name.
 
-Full methodology and the measured Precision@1, Precision@3, and MRR are
-in [`docs/search-evaluation.md`](docs/search-evaluation.md). Run it with
-`python backend/eval_search_quality.py`. The first run downloads the
-embedding model.
+```
+Keyword   Precision@1: 15/22 = 68.2%   MRR: 0.791
+Meaning   Precision@1: 20/22 = 90.9%   MRR: 0.924
+Combined  Precision@1: 20/22 = 90.9%   MRR: 0.931
+```
+
+The combined list fixes the old keyword miss on "write repository index
+to database", and it finds `_tokenize` for "break a camel case name into
+separate words". It still misses "save parsed symbols into the database".
+Methodology and the remaining misses are in
+[`docs/search-evaluation.md`](docs/search-evaluation.md). Run it with
+`python backend/eval_search_quality.py`.
 
 ## Limitations
 

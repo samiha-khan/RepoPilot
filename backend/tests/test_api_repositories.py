@@ -123,8 +123,13 @@ def test_index_repository_returns_index_summary(
 ) -> None:
     repository = make_repository(db_session, owner="octocat", name="demo")
 
-    def index_public_github_repository_stub(url: str) -> PublicRepositoryIndexSummary:
+    def index_public_github_repository_stub(
+        url: str,
+        *,
+        embed: bool = False,
+    ) -> PublicRepositoryIndexSummary:
         assert url == "https://github.com/octocat/demo"
+        assert embed is True
         return PublicRepositoryIndexSummary(
             repository=repository,
             total_files=1,
@@ -156,7 +161,11 @@ def test_index_repository_returns_422_for_invalid_github_url(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def index_public_github_repository_stub(url: str) -> PublicRepositoryIndexSummary:
+    def index_public_github_repository_stub(
+        url: str,
+        *,
+        embed: bool = False,
+    ) -> PublicRepositoryIndexSummary:
         raise InvalidPublicRepositoryUrlError("Repository URL must be an HTTPS GitHub URL.")
 
     monkeypatch.setattr(

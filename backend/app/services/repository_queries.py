@@ -22,8 +22,6 @@ PARTIAL_SYMBOL_MATCH_BOOST = 25.0
 BM25_K1 = 1.5
 BM25_B = 0.75
 MEANING_MIN_SCORE = 0.34
-KEYWORD_BLEND_WEIGHT = 0.25
-MEANING_BLEND_WEIGHT = 0.75
 
 
 @dataclass(frozen=True)
@@ -184,7 +182,6 @@ def _blend_hits(
         meaning_score = meaning_by_id[chunk_id][1] if chunk_id in meaning_by_id else 0.0
         keyword_norm = keyword_score / max_keyword_score if max_keyword_score else 0.0
         exact_symbol = code_chunk.symbol_name.lower() == query.strip().lower()
-        blend = KEYWORD_BLEND_WEIGHT * keyword_norm + MEANING_BLEND_WEIGHT * meaning_score
         why = _explain_hit(
             query,
             source_file,
@@ -203,7 +200,8 @@ def _blend_hits(
             (
                 (
                     0 if exact_symbol else 1,
-                    -blend,
+                    -meaning_score,
+                    -keyword_norm,
                     source_file.path,
                     code_chunk.start_line,
                     code_chunk.symbol_name,

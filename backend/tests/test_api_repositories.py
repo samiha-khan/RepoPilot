@@ -123,8 +123,13 @@ def test_index_repository_returns_index_summary(
 ) -> None:
     repository = make_repository(db_session, owner="octocat", name="demo")
 
-    def index_public_github_repository_stub(url: str) -> PublicRepositoryIndexSummary:
+    def index_public_github_repository_stub(
+        url: str,
+        *,
+        embed: bool = False,
+    ) -> PublicRepositoryIndexSummary:
         assert url == "https://github.com/octocat/demo"
+        assert embed is True
         return PublicRepositoryIndexSummary(
             repository=repository,
             total_files=1,
@@ -156,7 +161,11 @@ def test_index_repository_returns_422_for_invalid_github_url(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def index_public_github_repository_stub(url: str) -> PublicRepositoryIndexSummary:
+    def index_public_github_repository_stub(
+        url: str,
+        *,
+        embed: bool = False,
+    ) -> PublicRepositoryIndexSummary:
         raise InvalidPublicRepositoryUrlError("Repository URL must be an HTTPS GitHub URL.")
 
     monkeypatch.setattr(
@@ -258,6 +267,16 @@ def test_list_repository_files_returns_404_when_repository_is_missing(
     assert response.json() == {"detail": "Repository not found."}
 
 
+def _expected_why(query: str) -> str:
+    reasons = {
+        "handler": "The query appears in the symbol name.",
+        "RETURN USER": "The query words appear in the symbol name.",
+        "loads user data": "The query appears in the docstring.",
+        "services/users.py": "The query matches the file path.",
+    }
+    return f"Keyword rank 1. {reasons[query]}"
+
+
 @pytest.mark.parametrize(
     "query",
     [
@@ -301,6 +320,10 @@ def test_search_repository_code_matches_expected_fields(
             "end_line": 8,
             "docstring": "Loads user data",
             "source_code": "def handle_user():\n    return user\n",
+            "matched_by": ["keyword"],
+            "keyword_rank": 1,
+            "meaning_rank": None,
+            "why": _expected_why(query),
         }
     ]
 

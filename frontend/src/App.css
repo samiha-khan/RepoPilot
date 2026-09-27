@@ -204,6 +204,56 @@ button:disabled {
   padding: 3px 8px;
 }
 
+.method-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.method-badge {
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 3px 8px;
+}
+
+.method-badge.keyword {
+  background: #e7edf3;
+  color: #31404d;
+}
+
+.method-badge.meaning {
+  background: #e5f3ef;
+  color: #1f6a52;
+}
+
+.why {
+  color: #24303a;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.why-panel {
+  padding: 14px 16px;
+  border-bottom: 1px solid #edf1f5;
+  background: #f7fbfa;
+}
+
+.why-panel h3 {
+  margin: 0 0 6px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: #35605a;
+}
+
+.why-panel p {
+  margin: 0;
+  color: #24303a;
+  line-height: 1.5;
+}
+
 .line-range,
 .docstring {
   color: #5b6875;

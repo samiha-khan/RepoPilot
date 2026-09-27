@@ -4,7 +4,7 @@
 
 RepoPilot is a full-stack code search application for Python repositories. A user can index a public GitHub repository, select it from the web interface, and search the parsed code by symbol name, file path, docstring, or source text.
 
-The backend parses Python files with the standard `ast` module, stores repositories, source files, and code chunks in PostgreSQL, and ranks search results with BM25-style scoring. Re-indexing the same repository refreshes the existing database record instead of creating duplicates.
+The backend parses Python files with the standard `ast` module, stores repositories, source files, and code chunks in PostgreSQL, and ranks search with two methods at once. Keyword search scores shared words with BM25. Meaning search compares a local embedding of the question with an embedding stored for each code chunk. The page shows one result list and says which method ranked each hit. Re-indexing the same repository refreshes the existing database record instead of creating duplicates.
 
 ## Why
 
@@ -20,12 +20,17 @@ A few specific choices worth explaining:
   multi-line signatures, decorators, and nested functions. `ast` handles
   all of that correctly because it's parsing the actual grammar, not
   approximating it.
-- **BM25 over embeddings.** BM25 is precise, fast, and has no external
-  API dependency or vector index to maintain, which fits a tool meant to
-  index arbitrary public repos on demand. The tradeoff is BM25 matches
-  terms, not meaning, so a query and its target need to share vocabulary.
-  See `docs/search-evaluation.md` for where that tradeoff actually shows
-  up in practice.
+- **Keyword and meaning, not keyword alone.** BM25 is precise when the
+  query and the code share words. It misses questions whose wording never
+  appears in the symbol name, such as asking how a camel case name is
+  split and expecting `_tokenize()`. A local
+  `jina-embeddings-v2-base-code` model embeds each chunk at index time
+  and the question at search time. It is trained on code as well as
+  English, and it runs on CPU with no external embedding API. The blend
+  keeps an exact symbol name first, then combines the keyword score with
+  cosine similarity. Embeddings are stored as JSON and scored in Python,
+  so the same ranker runs on SQLite and PostgreSQL. See
+  `docs/search-evaluation.md` for the measured result.
 - **Postgres over re-parsing on every query.** Indexing is the expensive
   step (downloading, parsing, walking the whole repo). Persisting the
   result means search itself is cheap, and re-indexing an already-known
@@ -50,7 +55,8 @@ A few specific choices worth explaining:
 - Store repository metadata, source files, and code chunks in PostgreSQL
 - Refresh existing repository records when re-indexing
 - Search across symbol names, file paths, docstrings, and source code
-- Rank results with BM25-style scoring and deterministic tie-breaking
+- Rank results with BM25 keyword scores and local meaning embeddings
+- Show which method matched, and why the result ranked where it did
 - Show source previews and full source code for selected results
 - Index local repositories or GitHub HTTPS URLs through the CLI
 - Run the full application locally with Docker Compose
@@ -82,7 +88,7 @@ During indexing, RepoPilot walks Python files, skips common generated or depende
 
 The database stores repositories, source files, and code chunks as related records. When a repository is indexed again, the existing repository row is updated and its files and chunks are replaced with the latest indexed content.
 
-Search is scoped to one indexed repository at a time. Queries are matched against symbol names, file paths, docstrings, and source code. Results are ranked with BM25-style scoring, with additional priority for exact and partial symbol matches.
+Search is scoped to one indexed repository at a time. Keyword search matches the query against symbol names, file paths, docstrings, and source code, then ranks those hits with BM25. Meaning search embeds the question and compares it with the vector stored on each chunk. An exact symbol name stays first. After that, a meaning match outranks a keyword-only match, and keyword score breaks ties. The API returns the top 20 hits. Each hit records its keyword rank, its meaning rank, and a short explanation.
 
 ## Tech stack
 
@@ -95,6 +101,7 @@ Search is scoped to one indexed repository at a time. Queries are matched agains
 - psycopg
 - Typer
 - GitPython
+- fastembed (`jinaai/jina-embeddings-v2-base-code`, local ONNX)
 - pytest
 
 ### Frontend
@@ -252,25 +259,27 @@ docker compose exec backend python -m pytest tests
 Current backend test result:
 
 ```text
-100 passed
+103 passed
 ```
 
 ## Search quality
 
-The BM25 ranker is covered by unit tests, but ranking *quality* (does the
-right result actually end up near the top) is measured separately: 18
-hand-written queries against the real search function, evaluated on
-RepoPilot's own indexed codebase.
+Ranking quality is measured on 22 hand-written queries against this
+backend. Four of those questions use wording that does not appear in the
+expected symbol name.
 
 ```
-Precision@1: 15/18 = 83.3%
-Precision@3: 18/18 = 100.0%
-MRR:         0.917
+Keyword   Precision@1: 15/22 = 68.2%   MRR: 0.791
+Meaning   Precision@1: 20/22 = 90.9%   MRR: 0.924
+Combined  Precision@1: 20/22 = 90.9%   MRR: 0.931
 ```
 
-Full methodology, the two near-misses, and honest limitations of this
-evaluation are in [`docs/search-evaluation.md`](docs/search-evaluation.md).
-Run it yourself with `python backend/eval_search_quality.py`.
+The combined list fixes the old keyword miss on "write repository index
+to database", and it finds `_tokenize` for "break a camel case name into
+separate words". It still misses "save parsed symbols into the database".
+Methodology and the remaining misses are in
+[`docs/search-evaluation.md`](docs/search-evaluation.md). Run it with
+`python backend/eval_search_quality.py`.
 
 ## Limitations
 

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.models import CodeChunk, Repository, SourceFile
+from app.services.embeddings import Embedder, embedding_text, encode_embedding
 from app.services.repository_indexer import RepositoryIndexResult
 
 
@@ -25,7 +26,13 @@ class DatabaseWriter:
         name: str,
         url: str,
         default_branch: str | None = None,
+        embed: bool = False,
+        embedder: Embedder | None = None,
     ) -> Repository:
+        if embedder is None and embed:
+            from app.services.embeddings import get_embedder
+
+            embedder = get_embedder()
         self._validate_repository_metadata(owner=owner, name=name, url=url)
 
         try:
@@ -51,6 +58,7 @@ class DatabaseWriter:
                             sha256=indexed_file.sha256,
                             size=indexed_file.size,
                         )
+                        vectors = _embed_chunks(embedder, indexed_file)
                         source_file.code_chunks = [
                             CodeChunk(
                                 symbol_name=chunk.symbol_name,
@@ -59,8 +67,9 @@ class DatabaseWriter:
                                 end_line=chunk.end_line,
                                 source_code=chunk.source_code,
                                 docstring=chunk.docstring,
+                                embedding=vectors[index],
                             )
-                            for chunk in indexed_file.chunks
+                            for index, chunk in enumerate(indexed_file.chunks)
                         ]
                         repository.source_files.append(source_file)
 
@@ -105,3 +114,21 @@ class DatabaseWriter:
             raise DatabaseWriteError("Repository name cannot be empty.")
         if not url.strip():
             raise DatabaseWriteError("Repository URL cannot be empty.")
+
+
+def _embed_chunks(embedder: Embedder | None, indexed_file) -> list[str | None]:
+    if embedder is None or not indexed_file.chunks:
+        return [None] * len(indexed_file.chunks)
+    vectors = embedder.embed_passages(
+        [
+            embedding_text(
+                symbol_name=chunk.symbol_name,
+                symbol_type=chunk.symbol_type,
+                path=indexed_file.path,
+                docstring=chunk.docstring,
+                source_code=chunk.source_code,
+            )
+            for chunk in indexed_file.chunks
+        ]
+    )
+    return [encode_embedding(vector) for vector in vectors]

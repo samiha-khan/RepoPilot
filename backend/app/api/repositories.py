@@ -22,6 +22,7 @@ from app.services.public_repository_indexer import (
 from app.services import repository_queries
 
 router = APIRouter()
+SEARCH_RESULT_LIMIT = 20
 
 
 @router.post("/repositories/index", response_model=RepositoryIndexResponse)
@@ -87,6 +88,12 @@ def search_repository_code(
     if repository is None:
         raise HTTPException(status_code=404, detail="Repository not found.")
 
+    hits = repository_queries.search_repository_code(
+        db,
+        repository,
+        q,
+        embedder=get_embedder() if _repository_has_embeddings(db, repository) else None,
+    )
     return [
         CodeSearchResultResponse(
             file_path=hit.source_file.path,
@@ -101,12 +108,7 @@ def search_repository_code(
             meaning_rank=hit.meaning_rank,
             why=hit.why,
         )
-        for hit in repository_queries.search_repository_code(
-            db,
-            repository,
-            q,
-            embedder=get_embedder() if _repository_has_embeddings(db, repository) else None,
-        )
+        for hit in hits[:SEARCH_RESULT_LIMIT]
     ]
 
 

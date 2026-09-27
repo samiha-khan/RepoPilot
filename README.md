@@ -88,7 +88,7 @@ During indexing, RepoPilot walks Python files, skips common generated or depende
 
 The database stores repositories, source files, and code chunks as related records. When a repository is indexed again, the existing repository row is updated and its files and chunks are replaced with the latest indexed content.
 
-Search is scoped to one indexed repository at a time. Keyword search matches the query against symbol names, file paths, docstrings, and source code, then ranks those hits with BM25. Meaning search embeds the question and compares it with the vector stored on each chunk. An exact symbol name stays first. After that, a meaning match outranks a keyword-only match, and keyword score breaks ties. Each hit records its keyword rank, its meaning rank, and a short explanation.
+Search is scoped to one indexed repository at a time. Keyword search matches the query against symbol names, file paths, docstrings, and source code, then ranks those hits with BM25. Meaning search embeds the question and compares it with the vector stored on each chunk. An exact symbol name stays first. After that, a meaning match outranks a keyword-only match, and keyword score breaks ties. The API returns the top 20 hits. Each hit records its keyword rank, its meaning rank, and a short explanation.
 
 ## Tech stack
 

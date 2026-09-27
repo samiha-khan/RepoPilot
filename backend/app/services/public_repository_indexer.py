@@ -63,6 +63,7 @@ def index_public_github_repository(
     repository_url: str,
     *,
     writer: DatabaseWriter | None = None,
+    embed: bool = False,
 ) -> PublicRepositoryIndexSummary:
     metadata = parse_public_github_repository_url(repository_url)
     writer = writer or DatabaseWriter()
@@ -84,6 +85,7 @@ def index_public_github_repository(
                 name=metadata.name,
                 url=metadata.url,
                 default_branch=None,
+                embed=embed,
             )
         except DatabaseWriteError as exc:
             raise PublicRepositoryIndexError(

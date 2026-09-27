@@ -258,6 +258,16 @@ def test_list_repository_files_returns_404_when_repository_is_missing(
     assert response.json() == {"detail": "Repository not found."}
 
 
+def _expected_why(query: str) -> str:
+    reasons = {
+        "handler": "The query appears in the symbol name.",
+        "RETURN USER": "The query words appear in the symbol name.",
+        "loads user data": "The query appears in the docstring.",
+        "services/users.py": "The query matches the file path.",
+    }
+    return f"Keyword rank 1. {reasons[query]}"
+
+
 @pytest.mark.parametrize(
     "query",
     [
@@ -301,6 +311,10 @@ def test_search_repository_code_matches_expected_fields(
             "end_line": 8,
             "docstring": "Loads user data",
             "source_code": "def handle_user():\n    return user\n",
+            "matched_by": ["keyword"],
+            "keyword_rank": 1,
+            "meaning_rank": None,
+            "why": _expected_why(query),
         }
     ]
 

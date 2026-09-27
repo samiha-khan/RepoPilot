@@ -54,6 +54,7 @@ def index(
             name=metadata.name,
             url=metadata.url,
             default_branch=default_branch,
+            embed=True,
         )
     except (
         InvalidRepositorySourceError,

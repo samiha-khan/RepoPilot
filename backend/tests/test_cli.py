@@ -61,6 +61,7 @@ def test_index_command_infers_metadata_from_github_https_source(tmp_path: Path) 
         name="hello-world",
         url="https://github.com/octocat/hello-world",
         default_branch=None,
+        embed=True,
     )
 
 
@@ -80,6 +81,7 @@ def test_index_command_infers_metadata_from_local_https_origin(tmp_path: Path) -
         name="hello-world",
         url="https://github.com/octocat/hello-world",
         default_branch=None,
+        embed=True,
     )
 
 
@@ -96,6 +98,7 @@ def test_index_command_infers_metadata_from_local_ssh_origin(tmp_path: Path) -> 
         name="hello-world",
         url="https://github.com/octocat/hello-world",
         default_branch=None,
+        embed=True,
     )
 
 
@@ -127,6 +130,7 @@ def test_index_command_explicit_metadata_overrides_inferred_values(
         name="override-name",
         url="https://github.com/override-owner/override-name",
         default_branch="trunk",
+        embed=True,
     )
 
 
@@ -146,6 +150,7 @@ def test_index_command_partial_explicit_override(tmp_path: Path) -> None:
         name="hello-world",
         url="https://github.com/custom/location",
         default_branch=None,
+        embed=True,
     )
 
 

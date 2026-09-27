@@ -2,7 +2,7 @@ import os
 from collections.abc import Generator
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -30,6 +30,15 @@ def test_engine() -> Generator[Engine, None, None]:
     assert_test_database_url(database_url)
 
     engine = create_engine(database_url, pool_pre_ping=True)
+
+    @event.listens_for(engine, "connect")
+    def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+        if engine.dialect.name != "sqlite":
+            return
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
 

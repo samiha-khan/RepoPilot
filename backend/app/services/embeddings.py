@@ -3,9 +3,11 @@ import math
 from typing import Protocol
 
 
-EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
-# Official short-query instruction for this model. Passages are embedded as-is.
-BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
+EMBEDDING_MODEL = "jinaai/jina-embeddings-v2-base-code"
+# bge retrieval models expect this on the query only. The code model does not.
+QUERY_PREFIXES = {
+    "BAAI/bge-small-en-v1.5": "Represent this sentence for searching relevant passages: ",
+}
 
 
 class Embedder(Protocol):
@@ -75,6 +77,7 @@ class FastEmbedder:
         from fastembed import TextEmbedding
 
         self._model = TextEmbedding(model_name=model_name)
+        self._query_prefix = QUERY_PREFIXES.get(model_name, "")
 
     def embed_passages(self, texts: list[str]) -> list[list[float]]:
         if not texts:
@@ -82,7 +85,7 @@ class FastEmbedder:
         return [_as_floats(vector) for vector in self._model.passage_embed(texts)]
 
     def embed_query(self, text: str) -> list[float]:
-        vector = next(iter(self._model.query_embed(f"{BGE_QUERY_PREFIX}{text}")))
+        vector = next(iter(self._model.query_embed(f"{self._query_prefix}{text}")))
         return _as_floats(vector)
 
 

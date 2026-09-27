@@ -1,73 +1,76 @@
 # Search quality evaluation
 
-RepoPilot's BM25 ranker had unit tests but no evaluation of whether the
-ranking itself is actually good. This closes that gap.
+RepoPilot ranks one query with two methods. Keyword search is BM25 over
+the symbol name, path, docstring, and source. Meaning search compares a
+local embedding of the question with an embedding stored for each code
+chunk. The list a person sees keeps an exact symbol name first, then
+prefers a meaning match, and uses the keyword score to break ties.
 
 ## Method
 
 `backend/eval_search_quality.py` indexes RepoPilot's own backend (`app/`,
-19 files, 90 parsed functions/classes/methods) using the real parser and
-the real database models, in-memory SQLite instead of Postgres so it runs
-standalone. It then runs 18 hand-written queries through the actual
-`search_repository_code()` function used in production, not a
-reimplementation.
+20 files, 117 parsed symbols) with the real parser and the real database
+models, in an in-memory SQLite database. It then runs the same 22
+hand-written queries through keyword search, meaning search, and the
+combined list.
 
-Each query's expected answer was written by reading the real source
-before running anything, e.g. querying "bm25 field score" and expecting
-`_bm25_field_score` in `repository_queries.py`, because that function
-exists and does that. Nothing here was reverse-engineered from what the
-ranker happened to return.
+Each expected answer was written by reading the source, including the
+four questions whose words do not appear in the symbol name. The labels
+were not changed after seeing the model output.
+
+Meaning search uses `jinaai/jina-embeddings-v2-base-code` through
+fastembed. The model runs locally on CPU. A chunk stays in the meaning
+list when its cosine similarity is at least 0.34.
 
 ## Results
 
 ```
-Precision@1: 15/18 = 83.3%
-Precision@3: 18/18 = 100.0%
-MRR:         0.917
+Keyword   Precision@1: 15/22 = 68.2%   Precision@3: 19/22 = 86.4%   MRR: 0.791
+Meaning   Precision@1: 20/22 = 90.9%   Precision@3: 21/22 = 95.5%   MRR: 0.924
+Combined  Precision@1: 20/22 = 90.9%   Precision@3: 21/22 = 95.5%   MRR: 0.931
 ```
 
-Precision@1 asks: is the single top result the one you wanted? Precision@3
-asks: is it somewhere in the top 3? MRR (mean reciprocal rank) is the
-average of 1/rank across all queries, so a query answered at rank 1 scores
-1.0, rank 2 scores 0.5, and so on.
+Precision@1 asks whether the top result is the expected symbol.
+Precision@3 asks whether that symbol is anywhere in the top 3. MRR is
+the average of 1/rank, with 0 when the symbol is outside the top 10.
 
-## The two near-misses
+On the original 18 queries, keyword search was 15/18 at Precision@1.
+The combined list is 17/18 on those same queries. It fixes the previous
+keyword misses:
 
-Two queries landed the right answer at rank 2 instead of rank 1:
+- "write repository index to database" now returns `write()` ahead of
+  `DatabaseWriteError`.
+- "list repositories" and "get repository by id" now return the query
+  function ahead of the API route.
+- "parsed code chunk dataclass" now returns `ParsedCodeChunk`.
 
-- **"list repositories"** ranked the API route handler
-  (`app/api/repositories.py`) above the underlying query function
-  (`app/services/repository_queries.py::list_repositories`). Both
-  literally contain the phrase, and the route handler's file path
-  contains "repositories" as an exact substring, which BM25 rewards.
-  Reasonable behavior, not a bug, just not what a specific query had in
-  mind.
-- **"write repository index to database"** ranked the `DatabaseWriteError`
-  exception class above the actual `write()` method that does the writing.
-  This is the more informative one: pure keyword scoring doesn't
-  distinguish "this class is about writing" from "this class handles
-  errors when writing," because both contexts contain the same words. A
-  semantic/embedding-based ranker would likely do better here, since it
-  could distinguish "the thing that writes" from "the thing that reports
-  writing failed" by meaning rather than just term overlap. Worth
-  keeping in mind if this project's search is ever extended.
+Two questions that do not name the symbol also land on the right
+function:
 
-## Honest limitations of this evaluation
+- "break a camel case name into separate words" returns `_tokenize`.
+  Keyword search had ranked it 4th.
+- "how rare a word is across the indexed code" returns
+  `_bm25_field_score`. Keyword search did not place it in the top 10.
 
-- **18 queries is small.** It's enough to catch obvious ranking problems,
-  not enough to make a statistically confident claim about ranking
-  quality in general.
-- **Evaluated against RepoPilot's own codebase.** That's a defensible
-  choice, since it's a codebase I can write accurate expected-answers
-  for, but it also means the queries and the corpus have some shared
-  vocabulary (this is Python code about parsing and searching Python
-  code), which could make results look slightly better than they would
-  on a domain the queries weren't written by someone who knows the code
-  as well.
-- **Every "OK" here is objectively-correct-symbol-found, not
-  subjectively-good-result.** The metric doesn't capture whether the
-  *ranking of everything else* on the page is sensible, only whether the
-  one expected answer showed up near the top.
+## What is still wrong
+
+- **"save parsed symbols into the database"** still misses `write()`.
+  The combined list returns `DatabaseWriter` at rank 7. Meaning search
+  does not keep any chunk for this question, because the closest cosine
+  is under 0.34, so the list falls back to keyword order.
+- **"list files in a repository"** returns the API route at rank 1 and
+  the service function `list_repository_files` at rank 3. Keyword search
+  had the service function at rank 1. Meaning search prefers the route.
+
+## Honest limits
+
+- 22 queries can catch obvious ranking mistakes. They are not a
+  statistical claim about every repository.
+- The corpus is RepoPilot's own backend. The queries were written by
+  someone who had read that code.
+- The metric checks whether the expected symbol is near the top. It does
+  not score the rest of the page.
+- The first search after install downloads the embedding model.
 
 ## Running it
 
@@ -76,5 +79,5 @@ cd backend
 python eval_search_quality.py
 ```
 
-No database setup needed, it uses an in-memory SQLite instance and
-discards it when the script exits.
+No database setup is required. The script uses in-memory SQLite and
+discards it on exit. The first run downloads the embedding model.

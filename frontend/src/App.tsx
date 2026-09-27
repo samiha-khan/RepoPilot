@@ -20,6 +20,10 @@ type SearchResult = {
   end_line: number;
   docstring: string | null;
   source_code: string;
+  matched_by: string[];
+  keyword_rank: number | null;
+  meaning_rank: number | null;
+  why: string;
 };
 
 type IndexResponse = {
@@ -212,8 +216,10 @@ function App() {
           <p className="eyebrow">RepoPilot</p>
           <h1>Repository code search</h1>
           <p className="description">
-            Browse indexed Python repositories and inspect matching code chunks
-            stored by the backend indexer.
+            Search indexed Python code in one box. Keyword search matches the
+            words you type. Meaning search matches code that does the same job
+            when the names use different words. Each result says which method
+            found it and why it ranked there.
           </p>
         </div>
       </header>
@@ -265,7 +271,7 @@ function App() {
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Symbol, docstring, path, or source"
+              placeholder="Describe the code, or type a name"
             />
           </label>
           <button type="submit" disabled={!canSearch}>
@@ -290,7 +296,8 @@ function App() {
       ) : null}
       {!repositoriesLoading && repositories.length === 0 ? (
         <div className="status">
-          No repositories are indexed yet. Run the CLI index command first.
+          No repositories are indexed yet. Paste a public GitHub URL above and
+          click Index.
         </div>
       ) : null}
 
@@ -323,6 +330,20 @@ function App() {
                   <strong>{result.symbol_name}</strong>
                   <span>{result.symbol_type}</span>
                 </span>
+                <span className="method-row">
+                  {result.matched_by.map((method) => (
+                    <span className={`method-badge ${method}`} key={method}>
+                      {method === "keyword" ? "Keyword" : "Meaning"}
+                      {method === "keyword" && result.keyword_rank
+                        ? ` #${result.keyword_rank}`
+                        : ""}
+                      {method === "meaning" && result.meaning_rank
+                        ? ` #${result.meaning_rank}`
+                        : ""}
+                    </span>
+                  ))}
+                </span>
+                <span className="why">{result.why}</span>
                 <span className="line-range">
                   Lines {result.start_line}-{result.end_line}
                 </span>
@@ -346,6 +367,10 @@ function App() {
                   {selectedResult.symbol_name} · {selectedResult.start_line}-
                   {selectedResult.end_line}
                 </span>
+              </div>
+              <div className="why-panel">
+                <h3>Why this result</h3>
+                <p>{selectedResult.why}</p>
               </div>
               <pre>
                 <code>{selectedResult.source_code}</code>

@@ -44,6 +44,7 @@ class CodeChunk(Base):
     end_line: Mapped[int] = mapped_column(nullable=False)
     source_code: Mapped[str] = mapped_column(Text, nullable=False)
     docstring: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

@@ -35,6 +35,10 @@ class CodeSearchResultResponse(BaseModel):
     end_line: int
     docstring: str | None
     source_code: str
+    matched_by: list[str]
+    keyword_rank: int | None
+    meaning_rank: int | None
+    why: str
 
 
 class RepositoryIndexRequest(BaseModel):

@@ -22,13 +22,14 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(BACKEND_ROOT))
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.db.base import Base
 from app.models import CodeChunk, Repository, SourceFile
+from app.services.embeddings import embedding_text, encode_embedding, get_embedder
 from app.services.python_parser import parse_file
-from app.services.repository_queries import search_repository_code
+from app.services.repository_queries import keyword_search, meaning_search, search_repository_code
 
 APP_DIR = BACKEND_ROOT / "app"
 
@@ -53,6 +54,12 @@ QUERIES: list[tuple[str, str, str]] = [
     ("write repository index to database", "write", "database_writer.py"),
     ("find search candidates", "_find_search_candidates", "repository_queries.py"),
     ("list files in a repository", "list_repository_files", "repository_queries.py"),
+    # The words in these questions do not appear in the symbol name.
+    # Expected symbols were chosen by reading the implementation.
+    ("save parsed symbols into the database", "write", "database_writer.py"),
+    ("break a camel case name into separate words", "_tokenize", "repository_queries.py"),
+    ("how rare a word is across the indexed code", "_bm25_field_score", "repository_queries.py"),
+    ("turn a github zip archive into files on disk", "_extract_repository_archive", "public_repository_indexer.py"),
 ]
 
 
@@ -90,60 +97,102 @@ def index_repopilot_backend(session: Session) -> Repository:
             ))
             total_chunks += 1
 
+    session.flush()
+    rows = list(
+        session.execute(
+            select(SourceFile, CodeChunk).join(CodeChunk, CodeChunk.source_file_id == SourceFile.id)
+        )
+    )
+    embedder = get_embedder()
+    vectors = embedder.embed_passages(
+        [
+            embedding_text(
+                symbol_name=code_chunk.symbol_name,
+                symbol_type=code_chunk.symbol_type,
+                path=source_file.path,
+                docstring=code_chunk.docstring,
+                source_code=code_chunk.source_code,
+            )
+            for source_file, code_chunk in rows
+        ]
+    )
+    for (source_file, code_chunk), vector in zip(rows, vectors):
+        code_chunk.embedding = encode_embedding(vector)
+
     session.commit()
     print(f"Indexed {len(py_files)} files, {total_chunks} code chunks\n")
     return repo
 
 
-def evaluate(session: Session, repo: Repository) -> None:
+def _rank(results, expected_symbol: str, expected_file_substr: str) -> int | None:
+    for index, (source_file, code_chunk) in enumerate(results[:10]):
+        if (
+            code_chunk.symbol_name == expected_symbol
+            and expected_file_substr in source_file.path
+        ):
+            return index + 1
+    return None
+
+
+def _print_method(name: str, session: Session, repo: Repository, search) -> None:
     hits_at_1 = 0
     hits_at_3 = 0
     reciprocal_ranks = []
-    failures = []
-
+    print(f"\n=== {name} ===")
     for query, expected_symbol, expected_file_substr in QUERIES:
-        results = search_repository_code(session, repo, query)
-        rank = None
-        for i, (source_file, code_chunk) in enumerate(results[:10]):
-            if (code_chunk.symbol_name == expected_symbol
-                    and expected_file_substr in source_file.path):
-                rank = i + 1
-                break
-
+        results = search(query)
+        rank = _rank(results, expected_symbol, expected_file_substr)
         if rank == 1:
             hits_at_1 += 1
         if rank is not None and rank <= 3:
             hits_at_3 += 1
         reciprocal_ranks.append(1.0 / rank if rank else 0.0)
-
         top_result = (
             f"{results[0][1].symbol_name} ({results[0][0].path})" if results else "(no results)"
         )
         status = "OK  " if rank == 1 else ("~   " if rank and rank <= 3 else "MISS")
-        print(f"[{status}] '{query}' -> expected {expected_symbol}, "
-              f"got #{rank if rank else '>10'}: {top_result}")
-
-        if rank is None or rank > 3:
-            failures.append((query, expected_symbol, top_result))
+        print(
+            f"[{status}] '{query}' -> expected {expected_symbol}, "
+            f"got #{rank if rank else '>10'}: {top_result}"
+        )
 
     n = len(QUERIES)
-    print(f"\n=== Results (n={n} queries) ===")
     print(f"Precision@1: {hits_at_1}/{n} = {hits_at_1 / n:.1%}")
     print(f"Precision@3: {hits_at_3}/{n} = {hits_at_3 / n:.1%}")
     print(f"MRR:         {sum(reciprocal_ranks) / n:.3f}")
 
-    if failures:
-        print(f"\n=== Misses (expected result not in top 3) ===")
-        for query, expected, got in failures:
-            print(f"  '{query}': expected {expected}, top result was {got}")
 
-
-def main():
-    engine = create_engine("sqlite:///:memory:")
+def main() -> None:
+    engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         repo = index_repopilot_backend(session)
         evaluate(session, repo)
+
+
+def evaluate(session: Session, repo: Repository) -> None:
+    embedder = get_embedder()
+    _print_method(
+        "Keyword",
+        session,
+        repo,
+        lambda query: keyword_search(session, repo, query),
+    )
+    _print_method(
+        "Meaning",
+        session,
+        repo,
+        lambda query: meaning_search(session, repo, query, embedder),
+    )
+    _print_method(
+        "Blended",
+        session,
+        repo,
+        lambda query: [
+            (hit.source_file, hit.code_chunk)
+            for hit in search_repository_code(session, repo, query, embedder=embedder)
+        ],
+    )
 
 
 if __name__ == "__main__":

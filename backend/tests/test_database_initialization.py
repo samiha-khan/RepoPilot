@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, inspect, select
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import Session
 
 from app import main
@@ -39,6 +39,19 @@ def test_initialize_database_schema_keeps_existing_data() -> None:
 
     assert len(repositories) == 1
     assert repositories[0].owner == "octocat"
+
+
+def test_initialize_database_schema_adds_missing_embedding_column() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    initialize_database_schema(engine)
+
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE code_chunks DROP COLUMN embedding"))
+
+    initialize_database_schema(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("code_chunks")}
+    assert "embedding" in columns
 
 
 def test_app_startup_initializes_database_schema(monkeypatch) -> None:

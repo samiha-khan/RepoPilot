@@ -268,9 +268,22 @@ Precision@3: 18/18 = 100.0%
 MRR:         0.917
 ```
 
-Full methodology, the two near-misses, and honest limitations of this
-evaluation are in [`docs/search-evaluation.md`](docs/search-evaluation.md).
-Run it yourself with `python backend/eval_search_quality.py`.
+That number alone overstates things: it's measured against RepoPilot's own
+codebase, which shares vocabulary with the queries. Running the identical
+method against a genuinely external codebase ([psf/requests](https://github.com/psf/requests), no relationship to RepoPilot) gives a
+real, lower number:
+
+```
+Precision@1: 10/18 = 55.6%
+Precision@3: 17/18 = 94.4%
+MRR:         0.729
+```
+
+Full methodology, every near-miss explained, and honest limitations of
+both evaluations are in
+[`docs/search-evaluation.md`](docs/search-evaluation.md). Run them
+yourself with `python backend/eval_search_quality.py` and
+`python backend/eval_search_quality_external.py --requests-src <path>`.
 
 ## Limitations
 

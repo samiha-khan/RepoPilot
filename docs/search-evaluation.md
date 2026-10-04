@@ -78,3 +78,59 @@ python eval_search_quality.py
 
 No database setup needed, it uses an in-memory SQLite instance and
 discards it when the script exits.
+
+## External validation: does this hold up on a codebase it wasn't tuned on?
+
+The limitation above (shared vocabulary with RepoPilot's own code) isn't
+hypothetical. `backend/eval_search_quality_external.py` runs the identical
+method, same real parser, same real `search_repository_code()`, against
+[psf/requests](https://github.com/psf/requests): a well-known HTTP library
+with no relationship to RepoPilot, so there's no shared-vocabulary
+advantage. 18 queries, again written by reading the real `requests` source
+in `src/requests/*.py` before running anything, each expected symbol name
+checked for global uniqueness across the package first.
+
+```
+Precision@1: 10/18 = 55.6%
+Precision@3: 17/18 = 94.4%
+MRR:         0.729
+```
+
+Compared to the self-evaluation above (83.3% / 100.0% / 0.917), Precision@1
+drops by almost 28 points on a genuinely external codebase, while
+Precision@3 and MRR hold up much better (94.4% and 0.729 vs. 100% and
+0.917). That gap is the honest answer to the limitation flagged above: this
+ranker generalizes to code it's never seen, but is noticeably worse at
+putting the *single best* answer in the #1 slot once there's no shared
+vocabulary between the query author and the codebase.
+
+Every one of the 8 near-misses and the 1 miss follows the same mechanism:
+a shorter or more literally-matching symbol beats the intended one on raw
+term overlap. For example, `'send a get request'` (rank 8, the one actual
+miss) ranked `Session.send` above `get`, because the query's own word
+"send" is a literal, exact match against that method's name, which BM25
+rewards regardless of what the query actually meant. `'connection timeout
+error'` similarly ranked the parent class `ConnectionError` above the
+intended `ConnectTimeout`, because "connection" and "error" are both
+literally in `ConnectionError`'s name while `ConnectTimeout` only matches
+on "connection." This is the same root cause as the `database_writer.py`
+near-miss in the self-evaluation above, not a new failure mode, just a
+more frequent one once the query vocabulary isn't guaranteed to match the
+code's vocabulary.
+
+Honest limitations of this external check, same spirit as above: 18
+queries against one external codebase is still small, `requests` is
+itself clean, well-documented Python close in style to RepoPilot's own
+code (a messier or more idiosyncratically-named codebase would likely
+fare worse), and the near-miss/miss classification above is my own
+reading of *why* each case ranked the way it did, not something the
+ranker itself reports.
+
+Needs a local clone of `psf/requests` (not installed via pip, the actual
+source tree):
+
+```bash
+git clone --depth 1 https://github.com/psf/requests.git /tmp/requests
+cd backend
+python eval_search_quality_external.py --requests-src /tmp/requests/src/requests
+```

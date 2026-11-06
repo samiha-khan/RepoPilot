@@ -19,6 +19,8 @@ from app.services.public_repository_indexer import (
     index_public_github_repository,
 )
 from app.services import repository_queries
+from app.services.embeddings import get_default_embedder
+from app.services.repository_queries import SearchMode
 
 router = APIRouter()
 
@@ -80,6 +82,7 @@ def list_repository_files(
 def search_repository_code(
     repository_id: int,
     q: Annotated[str, Query(min_length=1)],
+    mode: SearchMode = "bm25",
     db: Session = Depends(get_db),
 ) -> list[CodeSearchResultResponse]:
     repository = repository_queries.get_repository(db, repository_id)
@@ -100,5 +103,7 @@ def search_repository_code(
             db,
             repository,
             q,
+            mode=mode,
+            embedder=get_default_embedder() if mode == "hybrid" else None,
         )
     ]

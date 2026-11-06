@@ -13,6 +13,8 @@ class Settings(BaseSettings):
         "https://repo-pilot-okaku0jzj-skportfolio.vercel.app,"
         "https://repo-pilot-sable.vercel.app"
     )
+    embeddings_enabled: bool = False
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
 
     @field_validator("database_url", mode="before")
     @classmethod

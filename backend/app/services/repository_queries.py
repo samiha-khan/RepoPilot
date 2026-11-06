@@ -1,11 +1,16 @@
 import math
 import re
 from collections import Counter
+from typing import Literal
 
+import numpy as np
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models import CodeChunk, Repository, SourceFile
+from app.services.embeddings import Embedder, bytes_to_vector
+
+SearchMode = Literal["bm25", "hybrid"]
 
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9]+")
 
@@ -19,6 +24,8 @@ EXACT_SYMBOL_MATCH_BOOST = 100.0
 PARTIAL_SYMBOL_MATCH_BOOST = 25.0
 BM25_K1 = 1.5
 BM25_B = 0.75
+VECTOR_SEARCH_TOP_K = 20
+RRF_K = 60
 
 
 def list_repositories(db: Session) -> list[Repository]:
@@ -51,6 +58,26 @@ def search_repository_code(
     db: Session,
     repository: Repository,
     query: str,
+    *,
+    mode: SearchMode = "bm25",
+    embedder: Embedder | None = None,
+) -> list[tuple[SourceFile, CodeChunk]]:
+    keyword_results = _keyword_search(db, repository, query)
+    if mode == "bm25" or embedder is None:
+        return keyword_results
+
+    vector_results = _vector_search(db, repository, query, embedder)
+    if not vector_results:
+        return keyword_results
+
+    fused_results = _reciprocal_rank_fusion([keyword_results, vector_results])
+    return _exact_symbol_matches_first(fused_results, query)
+
+
+def _keyword_search(
+    db: Session,
+    repository: Repository,
+    query: str,
 ) -> list[tuple[SourceFile, CodeChunk]]:
     candidates = _find_search_candidates(db, repository, query)
     corpus = _build_search_corpus(candidates)
@@ -79,6 +106,67 @@ def search_repository_code(
         )
         if _score > 0
     ]
+
+
+def _vector_search(
+    db: Session,
+    repository: Repository,
+    query: str,
+    embedder: Embedder,
+    top_k: int = VECTOR_SEARCH_TOP_K,
+) -> list[tuple[SourceFile, CodeChunk]]:
+    if not query.strip():
+        return []
+
+    rows = list(
+        db.execute(
+            select(SourceFile, CodeChunk)
+            .join(CodeChunk, CodeChunk.source_file_id == SourceFile.id)
+            .where(SourceFile.repository_id == repository.id)
+            .where(CodeChunk.embedding.is_not(None))
+            .order_by(CodeChunk.id)
+        )
+    )
+    if not rows:
+        return []
+
+    chunk_vectors = np.stack([bytes_to_vector(code_chunk.embedding) for _, code_chunk in rows])
+    similarities = chunk_vectors @ embedder.embed_query(query)
+    # Stable sort so ties keep a fixed order between runs.
+    best_indexes = np.argsort(-similarities, kind="stable")[:top_k]
+    return [tuple(rows[index]) for index in best_indexes]
+
+
+def _reciprocal_rank_fusion(
+    ranked_lists: list[list[tuple[SourceFile, CodeChunk]]],
+    k: int = RRF_K,
+) -> list[tuple[SourceFile, CodeChunk]]:
+    scores: dict[int, float] = {}
+    results: dict[int, tuple[SourceFile, CodeChunk]] = {}
+
+    for ranked_results in ranked_lists:
+        for rank, (source_file, code_chunk) in enumerate(ranked_results, start=1):
+            scores[code_chunk.id] = scores.get(code_chunk.id, 0.0) + 1.0 / (k + rank)
+            results[code_chunk.id] = (source_file, code_chunk)
+
+    ordered_ids = sorted(scores, key=lambda chunk_id: (-scores[chunk_id], chunk_id))
+    return [results[chunk_id] for chunk_id in ordered_ids]
+
+
+def _exact_symbol_matches_first(
+    results: list[tuple[SourceFile, CodeChunk]],
+    query: str,
+) -> list[tuple[SourceFile, CodeChunk]]:
+    # Fusion can push an exact name match below a result that both rankers
+    # liked a little. Someone typing a function name wants that function.
+    normalized_query = query.strip().lower()
+    exact_matches = [
+        result for result in results if result[1].symbol_name.lower() == normalized_query
+    ]
+    other_results = [
+        result for result in results if result[1].symbol_name.lower() != normalized_query
+    ]
+    return exact_matches + other_results
 
 
 def _find_search_candidates(

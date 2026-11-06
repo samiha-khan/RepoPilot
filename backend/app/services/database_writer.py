@@ -6,7 +6,15 @@ from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.models import CodeChunk, Repository, SourceFile
+from app.services.embeddings import (
+    Embedder,
+    build_chunk_text,
+    get_default_embedder,
+    vector_to_bytes,
+)
 from app.services.repository_indexer import RepositoryIndexResult
+
+_USE_DEFAULT_EMBEDDER = object()
 
 
 class DatabaseWriteError(RuntimeError):
@@ -14,8 +22,13 @@ class DatabaseWriteError(RuntimeError):
 
 
 class DatabaseWriter:
-    def __init__(self, session_factory: Callable[[], Session] = SessionLocal) -> None:
+    def __init__(
+        self,
+        session_factory: Callable[[], Session] = SessionLocal,
+        embedder: Embedder | None = _USE_DEFAULT_EMBEDDER,
+    ) -> None:
         self.session_factory = session_factory
+        self.embedder = get_default_embedder() if embedder is _USE_DEFAULT_EMBEDDER else embedder
 
     def write(
         self,
@@ -64,12 +77,39 @@ class DatabaseWriter:
                         ]
                         repository.source_files.append(source_file)
 
+                    self._embed_chunks(repository)
                     session.flush()
                     session.expunge(repository)
 
                 return repository
         except SQLAlchemyError as exc:
             raise DatabaseWriteError("Failed to write repository index to database.") from exc
+
+    def _embed_chunks(self, repository: Repository) -> None:
+        if self.embedder is None:
+            return
+
+        chunks = [
+            (source_file.path, code_chunk)
+            for source_file in repository.source_files
+            for code_chunk in source_file.code_chunks
+        ]
+        if not chunks:
+            return
+
+        vectors = self.embedder.embed_documents(
+            [
+                build_chunk_text(
+                    symbol_name=code_chunk.symbol_name,
+                    file_path=path,
+                    docstring=code_chunk.docstring,
+                    source_code=code_chunk.source_code,
+                )
+                for path, code_chunk in chunks
+            ]
+        )
+        for (_path, code_chunk), vector in zip(chunks, vectors):
+            code_chunk.embedding = vector_to_bytes(vector)
 
     def _get_or_create_repository(
         self,

@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     )
     embeddings_enabled: bool = False
     embedding_model: str = "BAAI/bge-small-en-v1.5"
+    reranker_enabled: bool = False
+    reranker_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
 
     @field_validator("database_url", mode="before")
     @classmethod

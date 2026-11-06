@@ -19,7 +19,7 @@ from app.services.public_repository_indexer import (
     index_public_github_repository,
 )
 from app.services import repository_queries
-from app.services.embeddings import get_default_embedder
+from app.services.embeddings import get_default_embedder, get_default_reranker
 from app.services.repository_queries import SearchMode
 
 router = APIRouter()
@@ -105,5 +105,6 @@ def search_repository_code(
             q,
             mode=mode,
             embedder=get_default_embedder() if mode == "hybrid" else None,
+            reranker=get_default_reranker() if mode == "hybrid" else None,
         )
     ]

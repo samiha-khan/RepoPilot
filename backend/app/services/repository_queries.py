@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models import CodeChunk, Repository, SourceFile
-from app.services.embeddings import Embedder, bytes_to_vector
+from app.services.embeddings import Embedder, Reranker, build_chunk_text, bytes_to_vector
 
 SearchMode = Literal["bm25", "hybrid"]
 
@@ -26,6 +26,7 @@ BM25_K1 = 1.5
 BM25_B = 0.75
 VECTOR_SEARCH_TOP_K = 20
 RRF_K = 60
+RERANK_TOP_K = 20
 
 
 def list_repositories(db: Session) -> list[Repository]:
@@ -61,6 +62,7 @@ def search_repository_code(
     *,
     mode: SearchMode = "bm25",
     embedder: Embedder | None = None,
+    reranker: Reranker | None = None,
 ) -> list[tuple[SourceFile, CodeChunk]]:
     keyword_results = _keyword_search(db, repository, query)
     if mode == "bm25" or embedder is None:
@@ -71,6 +73,8 @@ def search_repository_code(
         return keyword_results
 
     fused_results = _reciprocal_rank_fusion([keyword_results, vector_results])
+    if reranker is not None:
+        fused_results = _rerank(fused_results, query, reranker)
     return _exact_symbol_matches_first(fused_results, query)
 
 
@@ -151,6 +155,30 @@ def _reciprocal_rank_fusion(
 
     ordered_ids = sorted(scores, key=lambda chunk_id: (-scores[chunk_id], chunk_id))
     return [results[chunk_id] for chunk_id in ordered_ids]
+
+
+def _rerank(
+    results: list[tuple[SourceFile, CodeChunk]],
+    query: str,
+    reranker: Reranker,
+    top_k: int = RERANK_TOP_K,
+) -> list[tuple[SourceFile, CodeChunk]]:
+    head, tail = results[:top_k], results[top_k:]
+    scores = reranker.score(
+        query,
+        [
+            build_chunk_text(
+                symbol_name=code_chunk.symbol_name,
+                file_path=source_file.path,
+                docstring=code_chunk.docstring,
+                source_code=code_chunk.source_code,
+            )
+            for source_file, code_chunk in head
+        ],
+    )
+    # Ties keep the fused order.
+    order = sorted(range(len(head)), key=lambda index: (-scores[index], index))
+    return [head[index] for index in order] + tail
 
 
 def _exact_symbol_matches_first(

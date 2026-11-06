@@ -6,6 +6,7 @@ import numpy as np
 from app.core.config import get_settings
 
 DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
+DEFAULT_RERANKER_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2"
 MAX_SOURCE_CHARACTERS = 2000
 
 
@@ -14,6 +15,11 @@ class Embedder(Protocol):
         pass
 
     def embed_query(self, text: str) -> np.ndarray:
+        pass
+
+
+class Reranker(Protocol):
+    def score(self, query: str, texts: list[str]) -> list[float]:
         pass
 
 
@@ -42,12 +48,35 @@ class FastEmbedEmbedder:
         return self._model
 
 
+class FastEmbedReranker:
+    def __init__(self, model_name: str = DEFAULT_RERANKER_MODEL) -> None:
+        self.model_name = model_name
+        self._model = None
+
+    def score(self, query: str, texts: list[str]) -> list[float]:
+        if not texts:
+            return []
+        if self._model is None:
+            from fastembed.rerank.cross_encoder import TextCrossEncoder
+
+            self._model = TextCrossEncoder(self.model_name)
+        return [float(score) for score in self._model.rerank(query, texts)]
+
+
 @lru_cache
 def get_default_embedder() -> Embedder | None:
     settings = get_settings()
     if not settings.embeddings_enabled:
         return None
     return FastEmbedEmbedder(settings.embedding_model)
+
+
+@lru_cache
+def get_default_reranker() -> Reranker | None:
+    settings = get_settings()
+    if not settings.reranker_enabled:
+        return None
+    return FastEmbedReranker(settings.reranker_model)
 
 
 def build_chunk_text(

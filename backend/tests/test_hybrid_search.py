@@ -312,3 +312,51 @@ def test_search_endpoint_rejects_unknown_mode(
     response = client.get("/repositories/1/search", params={"q": "config", "mode": "fuzzy"})
 
     assert response.status_code == 422
+
+
+class FakeReranker:
+    def __init__(self, preferred_word: str) -> None:
+        self.preferred_word = preferred_word
+
+    def score(self, query: str, texts: list[str]) -> list[float]:
+        return [1.0 if self.preferred_word in text else 0.0 for text in texts]
+
+
+def test_reranker_reorders_hybrid_results(
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    embedder = FakeEmbedder()
+    write_repository(db_session_factory, embedder)
+
+    with db_session_factory() as session:
+        repository = load_repository(session)
+        results = search_repository_code(
+            session,
+            repository,
+            "read settings file",
+            mode="hybrid",
+            embedder=embedder,
+            reranker=FakeReranker("json.load"),
+        )
+
+    assert symbol_names(results)[0] == "load_config"
+
+
+def test_reranker_does_not_move_exact_symbol_match(
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    embedder = FakeEmbedder()
+    write_repository(db_session_factory, embedder)
+
+    with db_session_factory() as session:
+        repository = load_repository(session)
+        results = search_repository_code(
+            session,
+            repository,
+            "save_user",
+            mode="hybrid",
+            embedder=embedder,
+            reranker=FakeReranker("json.load"),
+        )
+
+    assert symbol_names(results)[0] == "save_user"

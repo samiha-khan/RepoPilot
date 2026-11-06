@@ -124,6 +124,12 @@ python eval_search_quality.py --mode hybrid
 
 ## Honest limitations of this evaluation
 
+- **The corpus is the code under test.** The internal eval indexes
+  RepoPilot's own `app/`, so adding search code changes what's being
+  searched. Numbers from different commits aren't directly comparable;
+  `compare_search_modes.py` runs every setup on the same snapshot so
+  comparisons within one run are fair.
+
 - **18 queries is small.** It's enough to catch obvious ranking problems,
   not enough to make a statistically confident claim about ranking
   quality in general.

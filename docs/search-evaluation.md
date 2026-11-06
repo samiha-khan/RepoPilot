@@ -52,6 +52,76 @@ Two queries landed the right answer at rank 2 instead of rank 1:
   writing failed" by meaning rather than just term overlap. Worth
   keeping in mind if this project's search is ever extended.
 
+## Hybrid search (BM25 plus embeddings)
+
+The `write()` near-miss above, plus the general point that BM25 needs
+shared vocabulary, led me to add an optional hybrid mode. Each chunk
+(symbol name, path, docstring, first 2,000 characters of source) is
+embedded with BGE-small through fastembed at index time. At query time
+the BM25 ranking and the top 20 nearest chunks by cosine similarity are
+merged with reciprocal rank fusion (k=60). If a result's symbol name is
+exactly the query, it stays on top, since fusion can otherwise push it
+down.
+
+The original 18 queries mostly reuse words from the code, so they can't
+show what embeddings add. I wrote 12 more that describe the code without
+using its names, with expected answers taken from reading the code, same
+as before. For example "turn blank strings into none" should find
+`_clean_metadata_value` in `cli.py`.
+
+Adding the embedding code to `app/` changed the indexed corpus to 20
+files and 109 chunks. BM25 still scores the same on the original set.
+
+| Query set | Mode | Precision@1 | Precision@3 | MRR |
+|---|---|---|---|---|
+| Original (18) | BM25 | 15/18 = 83.3% | 18/18 = 100.0% | 0.917 |
+| Original (18) | Hybrid | 14/18 = 77.8% | 18/18 = 100.0% | 0.889 |
+| Differently worded (12) | BM25 | 4/12 = 33.3% | 6/12 = 50.0% | 0.438 |
+| Differently worded (12) | Hybrid | 7/12 = 58.3% | 7/12 = 58.3% | 0.631 |
+
+What hybrid got right that BM25 didn't:
+
+- "write repository index to database" now returns `write()` first
+  instead of `DatabaseWriteError`, the exact case described above.
+- "turn blank strings into none" (rank 4 to 1), "prevent path traversal
+  when unpacking an archive" (2 to 1), and "fix heroku postgres
+  connection string" (2 to 1).
+
+What it got worse:
+
+- Four of the original queries ("search repository code", "list
+  repositories", "get repository by id", "list files in a repository")
+  now rank the API route handler first and the service function second.
+  Both have the same name and nearly the same words, and the embeddings
+  can't tell them apart either. Net effect is one fewer top-1 hit than
+  BM25.
+
+Still missed by both:
+
+- "skip node_modules and virtualenv folders" (`_is_excluded`). The
+  function body only references `EXCLUDED_DIRECTORIES`; the folder names
+  live in a constant that isn't part of the chunk.
+- "which frontend domains can call the api" (`allowed_cors_origins`).
+  It's a few lines with no docstring, so there's little text to embed.
+- "make sure a path stays within the project root", "liveness check
+  endpoint", and "combine keyword and vector rankings" weren't in BM25's
+  top 10 at all. Hybrid moved them to ranks 4, 5, and 8, closer but still
+  outside the top 3.
+
+The takeaway: hybrid is clearly better when the query doesn't share
+words with the code, a little worse when it does, so BM25 stays the
+default and hybrid is opt-in. Twelve queries is a small set, so I'd
+treat the gap as a direction, not a precise number. Hybrid hasn't been
+run on the external psf/requests eval yet.
+
+Run it with:
+
+```bash
+cd backend
+pip install -r requirements-embeddings.txt
+python eval_search_quality.py --mode hybrid
+```
+
 ## Honest limitations of this evaluation
 
 - **18 queries is small.** It's enough to catch obvious ranking problems,

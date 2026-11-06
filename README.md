@@ -4,7 +4,7 @@
 
 RepoPilot is a full-stack code search application for Python repositories. A user can index a public GitHub repository, select it from the web interface, and search the parsed code by symbol name, file path, docstring, or source text.
 
-The backend parses Python files with the standard `ast` module, stores repositories, source files, and code chunks in PostgreSQL, and ranks search results with BM25-style scoring. Re-indexing the same repository refreshes the existing database record instead of creating duplicates.
+The backend parses Python files with the standard `ast` module, stores repositories, source files, and code chunks in PostgreSQL, and ranks search results with BM25-style scoring. An optional hybrid mode adds code embeddings for queries that don't use the same words as the code. Re-indexing the same repository refreshes the existing database record instead of creating duplicates.
 
 ## Why
 
@@ -20,12 +20,15 @@ A few specific choices worth explaining:
   multi-line signatures, decorators, and nested functions. `ast` handles
   all of that correctly because it's parsing the actual grammar, not
   approximating it.
-- **BM25 over embeddings.** BM25 is precise, fast, and has no external
-  API dependency or vector index to maintain, which fits a tool meant to
+- **BM25 by default, embeddings as an option.** BM25 is precise, fast,
+  and has no model or vector index to maintain, which fits a tool meant to
   index arbitrary public repos on demand. The tradeoff is BM25 matches
   terms, not meaning, so a query and its target need to share vocabulary.
-  See `docs/search-evaluation.md` for where that tradeoff actually shows
-  up in practice.
+  Hybrid mode adds a small local embedding model (fastembed,
+  BGE-small) and merges both rankings with reciprocal rank fusion. It
+  does much better on differently worded queries and slightly worse on
+  keyword-style ones, so it's opt-in. See `docs/search-evaluation.md`
+  for the numbers.
 - **Postgres over re-parsing on every query.** Indexing is the expensive
   step (downloading, parsing, walking the whole repo). Persisting the
   result means search itself is cheap, and re-indexing an already-known
@@ -51,10 +54,11 @@ A few specific choices worth explaining:
 - Refresh existing repository records when re-indexing
 - Search across symbol names, file paths, docstrings, and source code
 - Rank results with BM25-style scoring and deterministic tie-breaking
+- Optional hybrid search (BM25 plus embeddings) with `mode=hybrid`
 - Show source previews and full source code for selected results
 - Index local repositories or GitHub HTTPS URLs through the CLI
 - Run the full application locally with Docker Compose
-- Backend test suite with 100 passing tests
+- Backend test suite with 112 passing tests
 
 ## How to use the live application
 
@@ -278,6 +282,30 @@ Precision@1: 10/18 = 55.6%
 Precision@3: 17/18 = 94.4%
 MRR:         0.729
 ```
+
+### Hybrid search
+
+I added 12 queries worded the way someone might describe code without
+knowing its names, like "make sure a path stays within the project root"
+for `_is_inside_repository`. Same corpus (now 20 files, 109 chunks), both
+modes:
+
+| Query set | Mode | Precision@1 | Precision@3 | MRR |
+|---|---|---|---|---|
+| Original (18) | BM25 | 83.3% | 100.0% | 0.917 |
+| Original (18) | Hybrid | 77.8% | 100.0% | 0.889 |
+| Differently worded (12) | BM25 | 33.3% | 50.0% | 0.438 |
+| Differently worded (12) | Hybrid | 58.3% | 58.3% | 0.631 |
+
+Hybrid fixes most of what BM25 can't find when the words don't match,
+but it costs one top-1 hit on the original queries. That's why BM25 is
+still the default. Hybrid hasn't been run against the external
+psf/requests eval yet.
+
+To use it, install `backend/requirements-embeddings.txt`, set
+`EMBEDDINGS_ENABLED=true`, re-index the repository, and search with
+`mode=hybrid`. Run the comparison with
+`python backend/eval_search_quality.py --mode hybrid`.
 
 Full methodology, every near-miss explained, and honest limitations of
 both evaluations are in

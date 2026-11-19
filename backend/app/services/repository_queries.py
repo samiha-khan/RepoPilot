@@ -1,24 +1,18 @@
-import math
-import re
-from collections import Counter
+import hashlib
+import threading
+from collections import OrderedDict
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import CodeChunk, Repository, SourceFile
+from app.search import DEFAULT_CONFIG, ChunkRecord, SearchConfig, SearchIndex
 
-TOKEN_PATTERN = re.compile(r"[A-Za-z0-9]+")
-
-FIELD_WEIGHTS = {
-    "symbol_name": 8.0,
-    "file_path": 4.0,
-    "docstring": 2.0,
-    "source_code": 1.0,
-}
-EXACT_SYMBOL_MATCH_BOOST = 100.0
-PARTIAL_SYMBOL_MATCH_BOOST = 25.0
-BM25_K1 = 1.5
-BM25_B = 0.75
+# Building an index tokenises every chunk of a repository, so built indexes
+# are kept in memory and reused until the stored chunks change.
+INDEX_CACHE_SIZE = 4
+_index_cache: OrderedDict[tuple[int, SearchConfig], tuple[str, SearchIndex]] = OrderedDict()
+_index_cache_lock = threading.Lock()
 
 
 def list_repositories(db: Session) -> list[Repository]:
@@ -51,169 +45,88 @@ def search_repository_code(
     db: Session,
     repository: Repository,
     query: str,
+    *,
+    limit: int | None = None,
+    config: SearchConfig = DEFAULT_CONFIG,
 ) -> list[tuple[SourceFile, CodeChunk]]:
-    candidates = _find_search_candidates(db, repository, query)
-    corpus = _build_search_corpus(candidates)
-    return [
-        source_file_and_chunk
-        for _score, source_file_and_chunk in sorted(
-            (
-                (
-                    _score_search_result(
-                        source_file,
-                        code_chunk,
-                        query,
-                        corpus,
-                    ),
-                    (source_file, code_chunk),
-                )
-                for source_file, code_chunk in candidates
-            ),
-            key=lambda scored_result: (
-                -scored_result[0],
-                scored_result[1][0].path,
-                scored_result[1][1].start_line,
-                scored_result[1][1].symbol_name,
-                scored_result[1][1].id,
-            ),
-        )
-        if _score > 0
-    ]
-
-
-def _find_search_candidates(
-    db: Session,
-    repository: Repository,
-    query: str,
-) -> list[tuple[SourceFile, CodeChunk]]:
-    search_terms = [query.strip(), *_tokenize(query)]
-    patterns = {
-        f"%{term}%"
-        for term in search_terms
-        if term
-    }
-    search_clauses = [
-        or_(
-            CodeChunk.symbol_name.ilike(pattern),
-            CodeChunk.source_code.ilike(pattern),
-            CodeChunk.docstring.ilike(pattern),
-            SourceFile.path.ilike(pattern),
-        )
-        for pattern in patterns
-    ]
-
-    if not search_clauses:
+    index = _get_index(db, repository, config)
+    records = index.search(query, limit=limit)
+    if not records:
         return []
 
-    return list(
-        db.execute(
+    rows = {
+        chunk.id: (source_file, chunk)
+        for source_file, chunk in db.execute(
             select(SourceFile, CodeChunk)
             .join(CodeChunk, CodeChunk.source_file_id == SourceFile.id)
-            .where(SourceFile.repository_id == repository.id)
-            .where(or_(*search_clauses))
+            .where(CodeChunk.id.in_([record.chunk_id for record in records]))
         )
+    }
+    return [rows[record.chunk_id] for record in records if record.chunk_id in rows]
+
+
+def clear_index_cache() -> None:
+    with _index_cache_lock:
+        _index_cache.clear()
+
+
+def _get_index(db: Session, repository: Repository, config: SearchConfig) -> SearchIndex:
+    key = (repository.id, config)
+    fingerprint = _repository_fingerprint(db, repository)
+
+    with _index_cache_lock:
+        cached = _index_cache.get(key)
+        if cached is not None and cached[0] == fingerprint:
+            _index_cache.move_to_end(key)
+            return cached[1]
+
+    index = SearchIndex(_load_chunk_records(db, repository), config)
+
+    with _index_cache_lock:
+        _index_cache[key] = (fingerprint, index)
+        _index_cache.move_to_end(key)
+        while len(_index_cache) > INDEX_CACHE_SIZE:
+            _index_cache.popitem(last=False)
+    return index
+
+
+def _repository_fingerprint(db: Session, repository: Repository) -> str:
+    """Cheap summary of the stored chunks, used to detect a re-index.
+
+    Re-indexing deletes and re-inserts every chunk, which gives them new ids
+    and creation times, so any re-index changes this value. It also works
+    when another process (such as the CLI) wrote to the database.
+    """
+    digest = hashlib.sha1()
+    rows = db.execute(
+        select(
+            CodeChunk.id,
+            CodeChunk.created_at,
+            func.length(CodeChunk.source_code),
+        )
+        .join(SourceFile, CodeChunk.source_file_id == SourceFile.id)
+        .where(SourceFile.repository_id == repository.id)
+        .order_by(CodeChunk.id)
     )
+    for chunk_id, created_at, source_length in rows:
+        digest.update(f"{chunk_id}:{created_at}:{source_length};".encode())
+    return digest.hexdigest()
 
 
-def _score_search_result(
-    source_file: SourceFile,
-    code_chunk: CodeChunk,
-    query: str,
-    corpus: dict[str, object],
-) -> float:
-    normalized_query = query.strip().lower()
-    query_tokens = _tokenize(query)
-    if not normalized_query and not query_tokens:
-        return 0.0
-
-    score = 0.0
-    normalized_symbol_name = code_chunk.symbol_name.lower()
-
-    if normalized_symbol_name == normalized_query:
-        score += EXACT_SYMBOL_MATCH_BOOST
-    elif normalized_query and normalized_query in normalized_symbol_name:
-        score += PARTIAL_SYMBOL_MATCH_BOOST
-
-    fields = {
-        "symbol_name": code_chunk.symbol_name,
-        "file_path": source_file.path,
-        "docstring": code_chunk.docstring or "",
-        "source_code": code_chunk.source_code,
-    }
-    for field_name, value in fields.items():
-        score += FIELD_WEIGHTS[field_name] * _bm25_field_score(
-            _tokenize(value),
-            query_tokens,
-            field_name,
-            corpus,
+def _load_chunk_records(db: Session, repository: Repository) -> list[ChunkRecord]:
+    rows = db.execute(
+        select(
+            CodeChunk.id,
+            SourceFile.path,
+            CodeChunk.symbol_name,
+            CodeChunk.symbol_type,
+            CodeChunk.start_line,
+            CodeChunk.end_line,
+            CodeChunk.docstring,
+            CodeChunk.source_code,
         )
-
-    return score
-
-
-def _build_search_corpus(
-    candidates: list[tuple[SourceFile, CodeChunk]],
-) -> dict[str, object]:
-    field_lengths: dict[str, list[int]] = {field_name: [] for field_name in FIELD_WEIGHTS}
-    document_frequencies: dict[str, Counter[str]] = {
-        field_name: Counter() for field_name in FIELD_WEIGHTS
-    }
-
-    for source_file, code_chunk in candidates:
-        fields = {
-            "symbol_name": code_chunk.symbol_name,
-            "file_path": source_file.path,
-            "docstring": code_chunk.docstring or "",
-            "source_code": code_chunk.source_code,
-        }
-        for field_name, value in fields.items():
-            tokens = _tokenize(value)
-            field_lengths[field_name].append(len(tokens))
-            document_frequencies[field_name].update(set(tokens))
-
-    average_lengths = {
-        field_name: sum(lengths) / len(lengths) if lengths else 0.0
-        for field_name, lengths in field_lengths.items()
-    }
-    return {
-        "document_count": len(candidates),
-        "average_lengths": average_lengths,
-        "document_frequencies": document_frequencies,
-    }
-
-
-def _bm25_field_score(
-    field_tokens: list[str],
-    query_tokens: list[str],
-    field_name: str,
-    corpus: dict[str, object],
-) -> float:
-    if not field_tokens or not query_tokens:
-        return 0.0
-
-    token_counts = Counter(field_tokens)
-    field_length = len(field_tokens)
-    document_count = int(corpus["document_count"])
-    average_lengths = corpus["average_lengths"]
-    document_frequencies = corpus["document_frequencies"]
-    average_length = average_lengths[field_name] or 1.0
-
-    score = 0.0
-    for token in set(query_tokens):
-        frequency = token_counts[token]
-        if frequency == 0:
-            continue
-
-        documents_with_term = document_frequencies[field_name][token]
-        idf = math.log(1 + (document_count - documents_with_term + 0.5) / (documents_with_term + 0.5))
-        denominator = frequency + BM25_K1 * (
-            1 - BM25_B + BM25_B * (field_length / average_length)
-        )
-        score += idf * ((frequency * (BM25_K1 + 1)) / denominator)
-
-    return score
-
-
-def _tokenize(value: str) -> list[str]:
-    value = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", value)
-    return [token.lower() for token in TOKEN_PATTERN.findall(value)]
+        .join(SourceFile, CodeChunk.source_file_id == SourceFile.id)
+        .where(SourceFile.repository_id == repository.id)
+        .order_by(SourceFile.path, CodeChunk.start_line, CodeChunk.id)
+    )
+    return [ChunkRecord(*row) for row in rows]

@@ -1,6 +1,6 @@
 from sqlalchemy.engine import Engine
 
-import app.models
+import app.models  # noqa: F401  (registers the tables on Base.metadata)
 from app.db.base import Base
 from app.db.session import engine
 

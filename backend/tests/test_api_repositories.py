@@ -330,7 +330,7 @@ def test_search_repository_code_is_scoped_to_repository(
     assert [result["file_path"] for result in response.json()] == ["target.py"]
 
 
-def test_search_repository_code_orders_results_deterministically(
+def test_search_repository_code_breaks_score_ties_by_location(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -340,27 +340,25 @@ def test_search_repository_code_orders_results_deterministically(
     db_session.add_all(
         [
             make_code_chunk(z_file, symbol_name="Alpha", start_line=1, end_line=1),
-            make_code_chunk(a_file, symbol_name="Beta", start_line=5, end_line=5),
             make_code_chunk(a_file, symbol_name="Alpha", start_line=5, end_line=5),
-            make_code_chunk(a_file, symbol_name="Gamma", start_line=2, end_line=2),
+            make_code_chunk(a_file, symbol_name="Alpha", start_line=2, end_line=2),
         ]
     )
     db_session.commit()
 
     response = client.get(
         f"/repositories/{repository.id}/search",
-        params={"q": "a"},
+        params={"q": "alpha"},
     )
 
     assert response.status_code == 200
     assert [
-        (result["file_path"], result["start_line"], result["symbol_name"])
+        (result["file_path"], result["start_line"])
         for result in response.json()
     ] == [
-        ("a.py", 2, "Gamma"),
-        ("a.py", 5, "Alpha"),
-        ("a.py", 5, "Beta"),
-        ("z.py", 1, "Alpha"),
+        ("a.py", 2),
+        ("a.py", 5),
+        ("z.py", 1),
     ]
 
 

@@ -6,10 +6,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
-import app.models
+import app.models  # noqa: F401  (registers the tables on Base.metadata)
 from app.db.base import Base
 
-DEFAULT_TEST_DATABASE_URL = "postgresql+psycopg://repofix:repofix@db:5432/repofix_test"
+DEFAULT_TEST_DATABASE_URL = "postgresql+psycopg://repopilot:repopilot@db:5432/repopilot_test"
 
 
 def get_test_database_url() -> str:
@@ -48,3 +48,12 @@ def db_session_factory(test_engine: Engine) -> sessionmaker[Session]:
 def db_session(db_session_factory: sessionmaker[Session]) -> Generator[Session, None, None]:
     with db_session_factory() as session:
         yield session
+
+
+@pytest.fixture(autouse=True)
+def reset_search_index_cache() -> Generator[None, None, None]:
+    from app.services.repository_queries import clear_index_cache
+
+    clear_index_cache()
+    yield
+    clear_index_cache()

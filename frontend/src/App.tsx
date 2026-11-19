@@ -29,6 +29,8 @@ type IndexResponse = {
   skipped_files: number;
 };
 
+const SEARCH_LIMIT = 50;
+
 const apiUrl = (import.meta.env.VITE_API_URL ?? "http://localhost:8000").replace(
   /\/$/,
   "",
@@ -189,7 +191,7 @@ function App() {
       const searchResults = await fetchJson<SearchResult[]>(
         `/repositories/${selectedRepositoryId}/search?q=${encodeURIComponent(
           query.trim(),
-        )}`,
+        )}&limit=${SEARCH_LIMIT}`,
       );
       setResults(searchResults);
       setSelectedResult(searchResults[0] ?? null);
@@ -290,7 +292,7 @@ function App() {
       ) : null}
       {!repositoriesLoading && repositories.length === 0 ? (
         <div className="status">
-          No repositories are indexed yet. Run the CLI index command first.
+          No repositories are indexed yet. Paste a public GitHub URL above to index one.
         </div>
       ) : null}
 
@@ -299,7 +301,7 @@ function App() {
           <div className="panel-header">
             <h2>Results</h2>
             {hasSearched && !searchLoading ? (
-              <span>{results.length} matches</span>
+              <span>{results.length === SEARCH_LIMIT ? `Top ${SEARCH_LIMIT}` : `${results.length} matches`}</span>
             ) : null}
           </div>
 

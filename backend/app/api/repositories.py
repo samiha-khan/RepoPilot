@@ -11,6 +11,7 @@ from app.schemas.repository import (
     RepositoryResponse,
     SourceFileResponse,
 )
+from app.services import repository_queries
 from app.services.public_repository_indexer import (
     InvalidPublicRepositoryUrlError,
     PublicRepositoryIndexError,
@@ -18,9 +19,11 @@ from app.services.public_repository_indexer import (
     RepositoryArchiveTooLargeError,
     index_public_github_repository,
 )
-from app.services import repository_queries
 
 router = APIRouter()
+
+DEFAULT_SEARCH_LIMIT = 50
+MAX_SEARCH_LIMIT = 200
 
 
 @router.post("/repositories/index", response_model=RepositoryIndexResponse)
@@ -80,6 +83,7 @@ def list_repository_files(
 def search_repository_code(
     repository_id: int,
     q: Annotated[str, Query(min_length=1)],
+    limit: Annotated[int, Query(ge=1, le=MAX_SEARCH_LIMIT)] = DEFAULT_SEARCH_LIMIT,
     db: Session = Depends(get_db),
 ) -> list[CodeSearchResultResponse]:
     repository = repository_queries.get_repository(db, repository_id)
@@ -100,5 +104,6 @@ def search_repository_code(
             db,
             repository,
             q,
+            limit=limit,
         )
     ]

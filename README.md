@@ -1,297 +1,191 @@
 # RepoPilot
 
-## Project overview
+Code search for Python repositories. Paste a public GitHub URL, and RepoPilot
+downloads it, splits the Python code into functions, methods and classes, and
+lets you search them by name, path, docstring or code, including with a plain
+description such as "convert a cookiejar to a dict".
 
-RepoPilot is a full-stack code search application for Python repositories. A user can index a public GitHub repository, select it from the web interface, and search the parsed code by symbol name, file path, docstring, or source text.
+- Live app: https://repo-pilot-sable.vercel.app
+- API: https://aqueous-earth-43412-5f6428188142.herokuapp.com
 
-The backend parses Python files with the standard `ast` module, stores repositories, source files, and code chunks in PostgreSQL, and ranks search results with BM25-style scoring. Re-indexing the same repository refreshes the existing database record instead of creating duplicates.
+![RepoPilot demo](docs/repopilot-demo.png)
 
-## Why
+## Why it exists
 
-`grep` and GitHub's own search match exact strings. If you don't already
-know a function is named `validate_user_session`, searching "check if
-someone's logged in" won't find it. RepoPilot indexes a repository's
-structure ahead of time (symbols, docstrings, file paths, source) so
-search can rank by relevance instead of requiring an exact string match.
+`grep` and GitHub's search need the string that is in the code. If you do not
+know that the function is called `validate_user_session`, "check if someone is
+logged in" finds nothing. RepoPilot parses a repository once, keeps the
+structure (symbols, docstrings, paths, source) and ranks results by relevance.
 
-A few specific choices worth explaining:
-
-- **AST parsing over regex.** Regex-based symbol extraction breaks on
-  multi-line signatures, decorators, and nested functions. `ast` handles
-  all of that correctly because it's parsing the actual grammar, not
-  approximating it.
-- **BM25 over embeddings.** BM25 is precise, fast, and has no external
-  API dependency or vector index to maintain, which fits a tool meant to
-  index arbitrary public repos on demand. The tradeoff is BM25 matches
-  terms, not meaning, so a query and its target need to share vocabulary.
-  See `docs/search-evaluation.md` for where that tradeoff actually shows
-  up in practice.
-- **Postgres over re-parsing on every query.** Indexing is the expensive
-  step (downloading, parsing, walking the whole repo). Persisting the
-  result means search itself is cheap, and re-indexing an already-known
-  repository is a refresh, not a rebuild.
-
-## Live demo
-
-- Frontend: https://repo-pilot-sable.vercel.app
-- Backend API: https://aqueous-earth-43412-5f6428188142.herokuapp.com
-
-### Example
-
-![RepoPilot Demo](docs/repopilot-demo.png)
-
-*RepoPilot indexing a public GitHub repository and searching indexed Python code.*
-
-## Features
-
-- Index public GitHub repositories from the web interface
-- Download public repository archives over HTTPS for production web indexing
-- Parse Python functions, async functions, classes, and methods using AST
-- Store repository metadata, source files, and code chunks in PostgreSQL
-- Refresh existing repository records when re-indexing
-- Search across symbol names, file paths, docstrings, and source code
-- Rank results with BM25-style scoring and deterministic tie-breaking
-- Show source previews and full source code for selected results
-- Index local repositories or GitHub HTTPS URLs through the CLI
-- Run the full application locally with Docker Compose
-- Backend test suite with 100 passing tests
-
-## How to use the live application
-
-1. Open the Vercel frontend: https://repo-pilot-sable.vercel.app
-2. Paste a public GitHub repository URL in this format:
-
-   ```text
-   https://github.com/owner/repository
-   ```
-
-3. Click **Index**.
-4. Wait for the success message.
-5. Select the indexed repository from the dropdown.
-6. Search by function name, class name, file path, docstring, or source text.
-7. Click a result to view its source code.
+The interesting part is the ranking, which is measured rather than assumed.
+See [Search quality](#search-quality) and
+[`docs/search-evaluation.md`](docs/search-evaluation.md).
 
 ## How it works
 
-RepoPilot has two indexing paths:
-
-- The production web flow accepts a public GitHub repository URL, downloads the repository archive over HTTPS, extracts it temporarily, indexes Python files, and writes the results to PostgreSQL.
-- The local CLI can index a local Git repository or clone a GitHub HTTPS URL using GitPython.
-
-During indexing, RepoPilot walks Python files, skips common generated or dependency directories, and parses each file with the existing AST parser. The parser extracts top-level functions, async functions, classes, and methods, including symbol names, line ranges, docstrings, and source code.
-
-The database stores repositories, source files, and code chunks as related records. When a repository is indexed again, the existing repository row is updated and its files and chunks are replaced with the latest indexed content.
-
-Search is scoped to one indexed repository at a time. Queries are matched against symbol names, file paths, docstrings, and source code. Results are ranked with BM25-style scoring, with additional priority for exact and partial symbol matches.
-
-## Tech stack
-
-### Backend
-
-- Python 3.12
-- FastAPI
-- SQLAlchemy
-- PostgreSQL
-- psycopg
-- Typer
-- GitPython
-- pytest
-
-### Frontend
-
-- React
-- TypeScript
-- Vite
-- CSS
-
-### Development and deployment
-
-- Docker
-- Docker Compose
-- Heroku
-- Vercel
-
-## Project structure
-
 ```text
-backend/
-  app/
-    api/
-    core/
-    db/
-    models/
-    schemas/
-    services/
-    cli.py
-    main.py
-  tests/
-
-frontend/
-  src/
-
-docker/
-  postgres/
-
-docker-compose.yml
+GitHub zip ──▶ extract .py ──▶ AST parser ──▶ PostgreSQL ──▶ in-memory BM25F index ──▶ API ──▶ React UI
+                                  │              repositories      built per repository,
+                                  │              source_files      rebuilt when chunks change
+                                  ▼              code_chunks
+                    function / async function / class / method
+                    (name, line range, docstring, source)
 ```
 
-## Running locally with Docker Compose
+1. **Indexing.** The backend downloads the repository archive over HTTPS,
+   extracts only the `.py` files (with size and file-count limits), and parses
+   each with Python's `ast` module. AST parsing handles decorators, multi-line
+   signatures and nested syntax that regex-based extraction gets wrong. Each
+   function, async function, class and method becomes a *chunk* with its name,
+   line range, docstring and source. Re-indexing a repository replaces its
+   files and chunks rather than adding duplicates.
+2. **Storage.** Repositories, source files and chunks live in PostgreSQL, so
+   search never needs to re-download or re-parse anything.
+3. **Search.** For each repository the backend builds an in-memory inverted
+   index and scores chunks with BM25F over four fields (symbol name, path,
+   docstring, body). Identifiers are split into words (`HTTPBasicAuth` into
+   http, basic, auth), queries drop English function words, and an exact
+   symbol-name match always comes first. The index is cached and rebuilt when
+   the stored chunks change. Details and evidence are in
+   [`docs/search-evaluation.md`](docs/search-evaluation.md).
+4. **UI.** A React and TypeScript single page app to index a repository, pick
+   one, search it and read the source of a result.
 
-Start the application:
+### Design choices
+
+- **BM25-family ranking, not embeddings.** It needs no model or vector store,
+  runs on a small host, and is a strong baseline on out-of-domain data
+  (Thakur et al., BEIR). The cost is that query and code must share words.
+  Embeddings have not been tried here; the evaluation harness is meant to make
+  that comparison possible.
+- **PostgreSQL for chunks, memory for the index.** Postgres is the source of
+  truth and survives restarts; the index is derived data, so it is rebuilt
+  from Postgres when needed instead of being stored.
+- **One chunk per symbol, class text separated from method text.** A class is
+  indexed by its own header and method names, not by its methods' bodies, so
+  it does not outrank the method you are looking for.
+
+## Search quality
+
+Ranking is evaluated on pinned versions of four open-source libraries and on
+RepoPilot itself, with three kinds of queries, bootstrap confidence intervals
+and a separate dev/test split for tuning. Against the previous implementation:
+
+| docstring queries, MRR | previous | current |
+|---|---|---|
+| psf/requests (124 queries) | 0.524 | 0.633 |
+| pallets/flask (178 queries) | 0.420 | 0.542 |
+
+Both improvements are statistically significant (paired bootstrap, 95%).
+Exact name lookups were already perfect and still are. The document also lists
+where ranking still fails and what the evaluation cannot tell you.
+
+```bash
+cd backend
+python -m evaluation.run fetch       # download the pinned corpora
+python -m evaluation.run synthetic   # docstring and identifier queries
+python -m evaluation.run ablate      # effect of each design decision
+```
+
+## Running locally
+
+With Docker:
 
 ```bash
 docker compose up --build
 ```
 
-Open the frontend at:
+- Frontend: http://localhost:5173
+- API: http://localhost:8000 (interactive docs at `/docs`)
 
-```text
-http://localhost:5173
-```
-
-The backend API is available at:
-
-```text
-http://localhost:8000
-```
-
-Interactive API documentation is available at:
-
-```text
-http://localhost:8000/docs
-```
-
-The default Docker Compose configuration starts PostgreSQL, the FastAPI backend, and the Vite frontend. Local database settings are defined in `.env.example`.
-
-## Indexing through the CLI
-
-Create the database tables if needed:
+Without Docker you need Python 3.12, Node 22 and a PostgreSQL 16 database:
 
 ```bash
-docker compose exec backend python -c "from app.db.base import Base; from app.db.session import engine; import app.models; Base.metadata.create_all(engine)"
+cp .env.example .env            # then point DATABASE_URL at your database
+cd backend
+pip install -r requirements-dev.txt
+uvicorn app.main:app --reload
+
+cd ../frontend
+npm ci
+npm run dev
 ```
 
-Index the repository mounted at `/workspace`:
+Configuration is read from environment variables (see `.env.example`).
+`CORS_ORIGINS` is a comma-separated list of allowed frontend origins; set it
+when you deploy the frontend somewhere else.
+
+## Command line
 
 ```bash
 docker compose exec backend python -m app.cli index /workspace
-```
-
-You can also index another repository available inside the container:
-
-```bash
 docker compose exec backend python -m app.cli index /path/to/repo \
-  --owner owner-name \
-  --name repo-name \
-  --url https://github.com/owner-name/repo-name
+  --owner owner-name --name repo-name --url https://github.com/owner-name/repo-name
 ```
 
-The CLI can infer repository metadata from GitHub HTTPS URLs and common GitHub `origin` remote formats. When metadata cannot be inferred, provide `--owner`, `--name`, and `--url`.
+The CLI accepts a local Git repository or a GitHub HTTPS URL and infers the
+owner and name from the remote when it can.
 
-## API endpoints
+## API
 
-The backend exposes these endpoints:
+| method | path | purpose |
+|---|---|---|
+| GET | `/health` | liveness check |
+| GET | `/repositories` | list indexed repositories |
+| POST | `/repositories/index` | index or re-index `{"url": "https://github.com/owner/repo"}` |
+| GET | `/repositories/{id}` | one repository |
+| GET | `/repositories/{id}/files` | its indexed files |
+| GET | `/repositories/{id}/search?q=...&limit=50` | ranked chunks (`limit` 1 to 200) |
 
-```text
-GET /health
-GET /repositories
-POST /repositories/index
-GET /repositories/{repository_id}
-GET /repositories/{repository_id}/files
-GET /repositories/{repository_id}/search?q=<query>
-```
+`POST /repositories/index` returns `422` for an invalid URL, `404` if the
+repository is not public, `413` if it exceeds the size limits and `502` if the
+download or persistence fails.
 
-### `POST /repositories/index`
-
-Indexes or re-indexes a public GitHub repository.
-
-Request body:
-
-```json
-{
-  "url": "https://github.com/owner/repository"
-}
-```
-
-Successful response:
-
-```json
-{
-  "repository": {
-    "id": 1,
-    "owner": "owner",
-    "name": "repository",
-    "url": "https://github.com/owner/repository",
-    "default_branch": "main",
-    "created_at": "2026-01-01T00:00:00Z",
-    "updated_at": "2026-01-01T00:00:00Z"
-  },
-  "total_files": 12,
-  "total_chunks": 48,
-  "skipped_files": 0
-}
-```
-
-Common error responses:
-
-- `422` for an invalid GitHub repository URL
-- `404` when the public repository archive cannot be found
-- `413` when the repository archive exceeds the configured size limit
-- `502` when the archive download or indexing process fails
-
-## Running tests
-
-Tests use a separate PostgreSQL test database.
-
-Run the backend test suite with:
+## Tests and checks
 
 ```bash
-docker compose exec backend python -m pytest tests
+cd backend
+python -m pytest        # needs TEST_DATABASE_URL pointing at a database whose name ends in _test
+ruff check .
 ```
 
-Current backend test result:
+or `docker compose exec backend python -m pytest`. The test fixture refuses to
+reset any database whose name does not end in `_test`. CI runs lint, the
+backend tests against PostgreSQL 16 and the frontend build.
+
+## Project layout
 
 ```text
-100 passed
+backend/
+  app/
+    api/         HTTP routes
+    search/      tokenizer, BM25F index, ranking parameters
+    services/    parser, indexer, archive download, database writer, queries
+    models/      SQLAlchemy models
+    cli.py       indexing from the command line
+  evaluation/    search evaluation harness, pinned corpora, committed results
+  tests/
+frontend/        React + TypeScript (Vite)
+docs/            evaluation write-up
 ```
-
-## Search quality
-
-The BM25 ranker is covered by unit tests, but ranking *quality* (does the
-right result actually end up near the top) is measured separately: 18
-hand-written queries against the real search function, evaluated on
-RepoPilot's own indexed codebase.
-
-```
-Precision@1: 15/18 = 83.3%
-Precision@3: 18/18 = 100.0%
-MRR:         0.917
-```
-
-That number alone overstates things: it's measured against RepoPilot's own
-codebase, which shares vocabulary with the queries. Running the identical
-method against a genuinely external codebase ([psf/requests](https://github.com/psf/requests), no relationship to RepoPilot) gives a
-real, lower number:
-
-```
-Precision@1: 10/18 = 55.6%
-Precision@3: 17/18 = 94.4%
-MRR:         0.729
-```
-
-Full methodology, every near-miss explained, and honest limitations of
-both evaluations are in
-[`docs/search-evaluation.md`](docs/search-evaluation.md). Run them
-yourself with `python backend/eval_search_quality.py` and
-`python backend/eval_search_quality_external.py --requests-src <path>`.
 
 ## Limitations
 
-- Web indexing supports public GitHub repositories only.
-- Private repositories are not supported.
-- RepoPilot indexes Python files only.
-- Web indexing runs synchronously, so large repositories can take longer to complete.
-- Repository archives are subject to size limits.
-- Public GitHub archive downloads are unauthenticated and may encounter GitHub rate limits.
-- Repositories must be indexed before they can be searched.
+- Python only; public GitHub repositories only.
+- Indexing runs inside the request, so large repositories are slow. Archives
+  over 25 MB (or with more than 5,000 files or 100 MB of Python source) are
+  refused.
+- GitHub archive downloads are unauthenticated and can be rate-limited.
+- The search index is held in memory, one per repository, at most four at a
+  time. A repository with around 100,000 chunks needs roughly 1.4 GB and about
+  20 seconds to build on the first search.
+- The database schema is created with `create_all`; there are no migrations.
+- There is no rate limiting or authentication on the indexing endpoint.
+- Nested functions and module-level variables are not indexed.
 
+## References
+
+Full list in [`docs/search-evaluation.md`](docs/search-evaluation.md#references).
+The ones that shaped the design: Robertson, Zaragoza and Taylor (BM25F, CIKM
+2004); Husain et al. (CodeSearchNet, 2019); Zhang et al. (cAST, 2025);
+Thakur et al. (BEIR, 2021).

@@ -48,8 +48,11 @@ GitHub zip ──▶ extract .py ──▶ AST parser ──▶ PostgreSQL ─�
    symbol-name match always comes first. The index is cached and rebuilt when
    the stored chunks change. Details and evidence are in
    [`docs/search-evaluation.md`](docs/search-evaluation.md).
-4. **UI.** A React and TypeScript single page app to index a repository, pick
-   one, search it and read the source of a result.
+4. **UI.** A React and TypeScript single page app. Each repository offers
+   example searches taken from its own docstrings, matched words are
+   highlighted, each result links to the exact lines on GitHub, and a search
+   can be shared as a link (`?repo=3&q=parse+arguments`). Test files are listed
+   after library code unless the query mentions "test".
 
 ### Design choices
 
@@ -73,12 +76,15 @@ and a separate dev/test split for tuning. Against the previous implementation:
 
 | docstring queries, MRR | previous | current |
 |---|---|---|
-| psf/requests (124 queries) | 0.524 | 0.633 |
-| pallets/flask (178 queries) | 0.420 | 0.542 |
+| psf/requests (124 queries) | 0.529 | 0.622 |
+| pallets/flask (178 queries) | 0.420 | 0.548 |
 
 Both improvements are statistically significant (paired bootstrap, 95%).
-Exact name lookups were already perfect and still are. The document also lists
-where ranking still fails and what the evaluation cannot tell you.
+Exact name lookups were already perfect and still are. I also tried a
+published technique (pseudo-relevance feedback), measured that it made things
+slightly worse, and left it off. The write-up lists where ranking still fails,
+what the evaluation cannot tell you, and why embedding models from recent code
+retrieval papers are not in yet.
 
 ```bash
 cd backend
@@ -123,6 +129,16 @@ docker compose exec backend python -m app.cli index /path/to/repo \
   --owner owner-name --name repo-name --url https://github.com/owner-name/repo-name
 ```
 
+To fill a fresh deployment with a few well-known libraries (requests, flask,
+click) so the app does not open empty:
+
+```bash
+python -m app.cli seed                       # the defaults
+python -m app.cli seed https://github.com/owner/repo
+```
+
+On Heroku, run it once with `heroku run python -m app.cli seed`.
+
 The CLI accepts a local Git repository or a GitHub HTTPS URL and infers the
 owner and name from the remote when it can.
 
@@ -136,6 +152,7 @@ owner and name from the remote when it can.
 | GET | `/repositories/{id}` | one repository |
 | GET | `/repositories/{id}/files` | its indexed files |
 | GET | `/repositories/{id}/search?q=...&limit=50` | ranked chunks (`limit` 1 to 200) |
+| GET | `/repositories/{id}/suggestions` | example queries taken from the repository's docstrings |
 
 `POST /repositories/index` returns `422` for an invalid URL, `404` if the
 repository is not public, `413` if it exceeds the size limits and `502` if the
@@ -182,10 +199,13 @@ docs/            evaluation write-up
 - The database schema is created with `create_all`; there are no migrations.
 - There is no rate limiting or authentication on the indexing endpoint.
 - Nested functions and module-level variables are not indexed.
+- `@overload` stubs are skipped, so repositories indexed before that change
+  should be indexed again to drop their duplicates.
 
 ## References
 
 Full list in [`docs/search-evaluation.md`](docs/search-evaluation.md#references).
 The ones that shaped the design: Robertson, Zaragoza and Taylor (BM25F, CIKM
 2004); Husain et al. (CodeSearchNet, 2019); Zhang et al. (cAST, 2025);
-Thakur et al. (BEIR, 2021).
+Thakur et al. (BEIR, 2021). Recent embedding-based work (CodeXEmbed,
+CoRNStack, jina-code-embeddings) is discussed there as the next step.

@@ -51,6 +51,15 @@ Code is in [`backend/app/search/`](../backend/app/search/).
   not by method bodies. The full source is still shown in the UI. This follows
   the idea in cAST (Zhang et al., 2025) that retrieval units should be
   self-contained and not duplicate each other's text.
+- **Overload stubs are not indexed.** Functions decorated with
+  `@overload` exist only for type checkers and repeat the name of the real
+  implementation, so each one showed up as a duplicate result. The parser now
+  skips them.
+- **Test files come last.** Results from test files are listed after results
+  from the rest of the code, unless the query contains the word "test". This is
+  a product decision, not a measured improvement: the evaluation corpora
+  exclude test directories, and queries written from library code would favour
+  any rule that pushes tests down, so no metric here could fairly judge it.
 - **Index built once per repository.** The in-memory index is cached and
   rebuilt when the stored chunks change (a fingerprint of chunk ids, creation
   times and source lengths is compared on each search). This also works when
@@ -115,12 +124,12 @@ ported faithfully.
 
 | corpus | split | queries | previous ranker | current ranker |
 |---|---|---|---|---|
-| click | dev | 195 | 0.315 [0.266, 0.371] | 0.492 [0.435, 0.552] |
+| click | dev | 195 | 0.318 [0.268, 0.372] | 0.490 [0.434, 0.550] |
 | httpx | dev | 110 | 0.363 [0.296, 0.430] | 0.450 [0.372, 0.528] |
-| requests | test | 124 | 0.524 [0.452, 0.596] | 0.633 [0.559, 0.704] |
-| flask | test | 178 | 0.420 [0.361, 0.478] | 0.542 [0.484, 0.598] |
+| requests | test | 124 | 0.529 [0.456, 0.602] | 0.622 [0.548, 0.691] |
+| flask | test | 178 | 0.420 [0.360, 0.478] | 0.548 [0.489, 0.606] |
 
-Recall@1 on the test corpora: requests 0.379 to 0.524, flask 0.287 to 0.404.
+Recall@1 on the test corpora: requests 0.387 to 0.508, flask 0.287 to 0.421.
 Full tables, including R@5, R@10 and nDCG@10, are in
 [`results/synthetic.md`](../backend/evaluation/results/synthetic.md).
 
@@ -128,11 +137,11 @@ Full tables, including R@5, R@10 and nDCG@10, are in
 
 | corpus | previous: P@1 / MRR | current: P@1 / MRR |
 |---|---|---|
-| requests (18) | 0.556 / 0.729 | 0.833 / 0.900 |
+| requests (18) | 0.556 / 0.729 | 0.833 / 0.907 |
 | RepoPilot, old backend (18) | 0.833 / 0.917 | 0.833 / 0.917 |
 
 On `requests` the two intervals overlap at 18 queries ([0.576, 0.868] against
-[0.778, 1.000]), although the paired test on the same queries excludes zero
+[0.796, 1.000]), although the paired test on the same queries excludes zero
 (see the ablation table). With so few queries, treat this as supporting the
 docstring results, not as a result on its own. On RepoPilot's own code there is
 no change at all.
@@ -153,26 +162,27 @@ baseline. `*` marks a paired-bootstrap 95% interval that excludes zero.
 | MRR | click | httpx | requests | flask | requests | flask | requests |
 |---|---|---|---|---|---|---|---|
 | | *docstring* | *docstring* | *docstring* | *docstring* | *identifier* | *identifier* | *hand* |
-| **current ranker** | 0.492 | 0.450 | 0.633 | 0.542 | 1.000 | 1.000 | 0.900 |
-| previous ranker | -0.178* | -0.087* | -0.109* | -0.122* | +0.000 | +0.000 | -0.171* |
-| no identifier splitting | -0.240* | -0.150* | -0.232* | -0.318* | +0.000 | +0.000 | -0.192* |
-| keep query stopwords | -0.108* | -0.101* | -0.049* | -0.114* | +0.000 | +0.000 | +0.007 |
-| no stemming | -0.062* | -0.009 | -0.038 | -0.038 | +0.000 | +0.000 | -0.028 |
-| no exact-name priority | +0.000 | +0.000 | +0.000 | +0.000 | -0.057* | -0.101* | +0.000 |
-| class indexed by full source | +0.008 | -0.050* | -0.020* | -0.015 | +0.000 | +0.000 | +0.000 |
-| per-field saturation instead of BM25F | -0.058* | -0.016 | -0.029 | -0.036 | +0.000 | +0.000 | -0.057 |
-| equal field weights | -0.042* | -0.137* | -0.084* | -0.097* | +0.000 | +0.000 | -0.039 |
+| **current ranker** | 0.490 | 0.450 | 0.622 | 0.548 | 1.000 | 1.000 | 0.907 |
+| previous ranker | -0.173* | -0.087* | -0.093* | -0.128* | +0.000 | +0.000 | -0.178* |
+| no identifier splitting | -0.236* | -0.150* | -0.214* | -0.324* | +0.000 | +0.000 | -0.199* |
+| keep query stopwords | -0.105* | -0.101* | -0.047* | -0.116* | +0.000 | +0.000 | +0.000 |
+| no stemming | -0.055* | -0.009 | -0.029 | -0.046* | +0.000 | +0.000 | -0.028 |
+| no exact-name priority | +0.000 | +0.000 | +0.000 | +0.000 | -0.058* | -0.100* | +0.000 |
+| class indexed by full source | +0.016 | -0.050* | -0.009 | -0.025* | +0.000 | +0.000 | +0.000 |
+| per-field saturation instead of BM25F | -0.043* | -0.016 | -0.015 | -0.038* | +0.000 | +0.000 | -0.065 |
+| equal field weights | -0.042* | -0.137* | -0.084* | -0.101* | +0.000 | +0.000 | -0.042 |
 
 Reading it:
 
 - Identifier splitting is the largest single effect, then stopword handling.
-- Stemming helps on every corpus but is only clearly significant on click.
-- The class-body change helps on httpx and requests (significant), is within
-  noise on flask and the hand-labelled sets, and is slightly worse on click
-  (not significant).
-- BM25F against per-field saturation: the sign favours BM25F on every column but
-  only click is significant on its own. I would not claim more than
-  "consistently a little better, not shown to be large".
+- Stemming helps on every corpus but is only clearly significant on click and
+  flask.
+- The class-body change is significantly better on httpx and flask, within noise
+  on requests and the hand-labelled sets, and slightly worse on click (not
+  significant).
+- BM25F against per-field saturation: the sign favours BM25F on every column,
+  significantly on click and flask. I would not claim more than "consistently a
+  little better".
 - Equal field weights is clearly worse, so the weights carry information.
 - A fifth idea, indexing the whole identifier (`parse_file`) as an extra token,
   was tried and removed. Once the exact-name rule existed it changed nothing
@@ -183,7 +193,7 @@ Reading it:
 A grid over name weight {1, 2, 3, 5}, path weight {0.25, 0.5, 1}, body weight
 {0.25, 0.5, 1} was scored on the two dev corpora only
 ([`results/tune.md`](../backend/evaluation/results/tune.md)). The best point
-(3.0, 1.0, 0.25) is the default. The top ten points lie within 0.02 MRR of each
+(3.0, 1.0, 0.25) is the default. The top ten points lie within 0.015 MRR of each
 other, the worst point is 0.10 lower. So the ranker is not sensitive to the
 exact values, but it does need the name field weighted well above the body.
 
@@ -230,23 +240,72 @@ repository, with at most four cached (`INDEX_CACHE_SIZE`). Large repositories
 are therefore limited by memory on small hosts, and the first search after a
 restart pays the build cost.
 
+## A published idea that did not help: pseudo-relevance feedback
+
+Pseudo-relevance feedback assumes the top results of a first search are
+relevant, adds the terms they share to the query, and searches again. Relevance
+models (Lavrenko and Croft, SIGIR 2001) and their query-interpolated form
+(Abdul-Jaleel et al., UMass at TREC 2004) are the usual references. It is
+attractive here because code and queries often use different words, and it
+needs no model and no extra hosting.
+
+It is implemented in `SearchIndex` (off by default) and was evaluated like
+everything else: a grid over feedback documents {3, 5, 10}, added terms {5, 10,
+20} and weight {0.1, 0.3, 0.5}, chosen on the dev corpora only
+([`results/prf.md`](../backend/evaluation/results/prf.md)). Result:
+
+- Feedback off scores 0.4699 mean MRR on the dev corpora. The best feedback
+  setting scores 0.4588, and every one of the 27 settings is below 0.4699.
+- On the test corpora the best dev setting is slightly worse everywhere
+  (differences of -0.014 on requests and -0.019 on flask for docstring queries;
+  the flask interval only just touches zero).
+
+So it is not used. A plausible reason is that these queries are short and the
+repositories small, so the top few results are right often enough that
+expansion mostly adds noise to a ranking that was already good at rank 1. I did
+not test that explanation. The code stays because the result is reproducible
+with `python -m evaluation.run prf`, and it may behave differently on much
+larger repositories or on vaguer queries.
+
+## Recent work on code retrieval, and why embeddings are not in yet
+
+Dense retrievers built for code have improved quickly. CodeXEmbed (Salesforce AI
+Research, COLM 2025; arXiv:2411.12644) is a family of 400M to 7B parameter models and
+reports first place on CoIR. CoRNStack (Suresh et al., ICLR 2025;
+arXiv:2412.01007) contributes cleaned contrastive training data and a reranker.
+The jina-code-embeddings models (Kryvosheieva et al., arXiv:2508.21290,
+NeurIPS 2025) reach comparable scores with 0.5B and 1.5B parameters. All of
+these are the authors' own reports on benchmarks, not results on this project.
+
+They are not integrated because:
+
+1. They have not been evaluated here. The sandbox this work was done in could
+   not download model weights, so adding one would have been untested code.
+2. They need hundreds of megabytes to several gigabytes of memory, plus a
+   vector store, which is the opposite of a project meant to run on a small
+   free host.
+3. Licences differ and need checking. At the time of writing the jina 0.5B
+   model's page lists a non-commercial licence.
+4. BEIR (Thakur et al., 2021) found BM25 a strong zero-shot baseline that dense
+   models often fail to beat out of domain, and CoIR found that even strong
+   models struggle on code retrieval tasks, so the gain is not guaranteed on
+   arbitrary repositories.
+
+The harness is built so a dense ranker is one more function with the same
+signature as the current one. The plan, if you want to run it on your own
+machine: embed each chunk with a model from the list above, search by cosine
+similarity, fuse with the BM25F ranking using reciprocal rank fusion (Cormack
+et al., SIGIR 2009), and keep it only if the paired comparison on the test
+corpora shows a significant gain.
+
 ## Not done, and why
 
-- **Dense retrieval and fusion.** Embedding models trained for code are the
-  obvious next step, and combining them with BM25 using reciprocal rank fusion
-  (Cormack et al., SIGIR 2009) is a standard way to avoid losing exact matches.
-  I did not add it because I could not show it would help here without the
-  evaluation above, and it would add a model to download and host. Two papers
-  informed that decision rather than settled it: BEIR (Thakur et al., 2021)
-  found BM25 a strong zero-shot baseline that dense models often fail to beat
-  out of domain, and CoIR (Li et al., 2024) found that even strong models
-  struggle on code retrieval tasks. The evaluation harness is built so that a
-  dense ranker can be added as another function and compared with the same
-  paired tests.
 - **Qualified names for methods.** `write` alone is ambiguous; showing
   `DatabaseWriter.write` needs a schema change and a migration tool.
 - **More languages.** The parser is Python's `ast`. Tree-sitter would cover
   other languages and is what cAST uses.
+- **Persisted index.** The index is rebuilt in memory; storing it in
+  PostgreSQL would remove the memory limit described above.
 
 ## Reproducing
 
@@ -258,6 +317,7 @@ python -m evaluation.run hand        # hand-labelled queries, previous vs curren
 python -m evaluation.run synthetic   # docstring queries and identifier lookup
 python -m evaluation.run ablate      # one decision switched off at a time
 python -m evaluation.run tune        # weight grid on the dev corpora
+python -m evaluation.run prf         # pseudo-relevance feedback: tuned on dev, reported on all
 python -m evaluation.run -v hand     # also list the queries that were not answered at rank 1
 ```
 
@@ -284,6 +344,16 @@ Each command takes under a minute. Results written to
   Models.* NeurIPS Datasets and Benchmarks, 2021. arXiv:2104.08663
 - X. Li et al. *CoIR: A Comprehensive Benchmark for Code Information Retrieval
   Models.* arXiv:2407.02883, 2024.
+- V. Lavrenko, W. B. Croft. *Relevance-Based Language Models.* SIGIR 2001, pp.
+  120-127. doi:10.1145/383952.383972
+- N. Abdul-Jaleel et al. *UMass at TREC 2004: Novelty and HARD.* TREC 2004.
+- Salesforce AI Research. *CodeXEmbed: A Generalist Embedding Model Family for
+  Multilingual and Multi-task Code Retrieval.* COLM 2025. arXiv:2411.12644
+- T. Suresh, R. Gangi Reddy, Y. Xu, Z. Nussbaum, A. Mulyar, B. Duderstadt, H.
+  Ji. *CoRNStack: High-Quality Contrastive Data for Better Code Retrieval and
+  Reranking.* ICLR 2025. arXiv:2412.01007
+- D. Kryvosheieva, S. Sturua, M. Günther, S. Martens, H. Xiao. *Efficient Code
+  Embeddings from Code Generation Models.* NeurIPS 2025. arXiv:2508.21290
 - G. Cormack, C. Clarke, S. Büttcher. *Reciprocal Rank Fusion outperforms
   Condorcet and individual rank learning methods.* SIGIR 2009.
   doi:10.1145/1571941.1572114

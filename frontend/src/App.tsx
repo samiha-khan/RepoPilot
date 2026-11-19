@@ -1,6 +1,7 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import "./App.css";
+import { Highlight, docstringSummary, isTestPath, queryTerms } from "./highlight";
 
 type Repository = {
   id: number;
@@ -31,6 +32,23 @@ type IndexResponse = {
 
 const SEARCH_LIMIT = 50;
 
+// Well-known libraries to try when nothing is indexed yet.
+const EXAMPLE_REPOSITORIES = [
+  "https://github.com/psf/requests",
+  "https://github.com/pallets/click",
+  "https://github.com/pallets/flask",
+];
+
+// Shareable links look like ?repo=3&q=parse+a+date. They are read once on load.
+const initialParams = new URLSearchParams(window.location.search);
+const initialRepositoryId = Number(initialParams.get("repo")) || undefined;
+const initialQuery = initialParams.get("q") ?? "";
+
+function githubUrl(repository: Repository, result: SearchResult): string {
+  // "HEAD" resolves to the repository's default branch on GitHub.
+  return `${repository.url}/blob/HEAD/${result.file_path}#L${result.start_line}-L${result.end_line}`;
+}
+
 const apiUrl = (import.meta.env.VITE_API_URL ?? "http://localhost:8000").replace(
   /\/$/,
   "",
@@ -56,7 +74,12 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
 function App() {
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [selectedRepositoryId, setSelectedRepositoryId] = useState("");
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [serverSlow, setServerSlow] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const [searchedQuery, setSearchedQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [selectedResult, setSelectedResult] = useState<SearchResult | null>(null);
   const [repositoriesLoading, setRepositoriesLoading] = useState(true);
@@ -87,6 +110,8 @@ function App() {
     ) => {
       setRepositoriesLoading(true);
       setError(null);
+      // Free hosting pauses idle servers; say so instead of looking broken.
+      const slowTimer = window.setTimeout(() => setServerSlow(true), 3000);
 
       try {
         const loadedRepositories =
@@ -117,7 +142,9 @@ function App() {
           );
         }
       } finally {
+        window.clearTimeout(slowTimer);
         if (shouldApply()) {
+          setServerSlow(false);
           setRepositoriesLoading(false);
         }
       }
@@ -128,7 +155,7 @@ function App() {
   useEffect(() => {
     let isActive = true;
 
-    void loadRepositories(undefined, () => isActive);
+    void loadRepositories(initialRepositoryId, () => isActive);
 
     return () => {
       isActive = false;
@@ -175,10 +202,9 @@ function App() {
     }
   }
 
-  async function handleSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!canSearch) {
+  const runSearch = useCallback(async (repositoryId: string, text: string) => {
+    const trimmed = text.trim();
+    if (!repositoryId || trimmed.length === 0) {
       return;
     }
 
@@ -186,11 +212,17 @@ function App() {
     setError(null);
     setHasSearched(true);
     setSelectedResult(null);
+    setSearchedQuery(trimmed);
+    window.history.replaceState(
+      null,
+      "",
+      `?repo=${repositoryId}&q=${encodeURIComponent(trimmed)}`,
+    );
 
     try {
       const searchResults = await fetchJson<SearchResult[]>(
-        `/repositories/${selectedRepositoryId}/search?q=${encodeURIComponent(
-          query.trim(),
+        `/repositories/${repositoryId}/search?q=${encodeURIComponent(
+          trimmed,
         )}&limit=${SEARCH_LIMIT}`,
       );
       setResults(searchResults);
@@ -205,7 +237,73 @@ function App() {
     } finally {
       setSearchLoading(false);
     }
+  }, []);
+
+  function handleSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void runSearch(selectedRepositoryId, query);
   }
+
+  function applySuggestion(text: string) {
+    setQuery(text);
+    void runSearch(selectedRepositoryId, text);
+  }
+
+  async function copySource() {
+    if (!selectedResult) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(selectedResult.source_code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setError("Copying is not available in this browser.");
+    }
+  }
+
+  // Example searches taken from the selected repository's own docstrings.
+  useEffect(() => {
+    setSuggestions([]);
+    if (!selectedRepositoryId) {
+      return;
+    }
+    let isActive = true;
+    fetchJson<string[]>(`/repositories/${selectedRepositoryId}/suggestions`)
+      .then((items) => {
+        if (isActive) {
+          setSuggestions(items);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      isActive = false;
+    };
+  }, [selectedRepositoryId]);
+
+  // A link with ?q=... runs its search once the repository list has loaded.
+  const ranInitialSearch = useRef(false);
+  useEffect(() => {
+    if (!ranInitialSearch.current && selectedRepositoryId && initialQuery) {
+      ranInitialSearch.current = true;
+      void runSearch(selectedRepositoryId, initialQuery);
+    }
+  }, [selectedRepositoryId, runSearch]);
+
+  // Press "/" anywhere to jump to the search box.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement;
+      if (event.key === "/" && !["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName)) {
+        event.preventDefault();
+        searchInput.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const highlightTerms = useMemo(() => queryTerms(searchedQuery), [searchedQuery]);
 
   return (
     <main className="app-shell">
@@ -214,8 +312,9 @@ function App() {
           <p className="eyebrow">RepoPilot</p>
           <h1>Repository code search</h1>
           <p className="description">
-            Browse indexed Python repositories and inspect matching code chunks
-            stored by the backend indexer.
+            Find functions and classes in a Python repository by describing what
+            they do or by typing a name. Press <kbd>/</kbd> to jump to the search
+            box.
           </p>
         </div>
       </header>
@@ -264,10 +363,11 @@ function App() {
           <label className="field search-field">
             <span>Search code</span>
             <input
+              ref={searchInput}
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Symbol, docstring, path, or source"
+              placeholder="Describe what you need, or type a name"
             />
           </label>
           <button type="submit" disabled={!canSearch}>
@@ -279,11 +379,31 @@ function App() {
       {indexMessage ? <div className="status success">{indexMessage}</div> : null}
       {selectedRepository ? (
         <section className="repository-summary">
-          <span>{selectedRepository.url}</span>
-          <span>
-            Default branch: {selectedRepository.default_branch ?? "unknown"}
-          </span>
+          <a href={selectedRepository.url} target="_blank" rel="noreferrer">
+            {selectedRepository.url}
+          </a>
+          {suggestions.length > 0 ? (
+            <span className="suggestions">
+              <span>Try:</span>
+              {suggestions.map((text) => (
+                <button
+                  className="chip"
+                  key={text}
+                  onClick={() => applySuggestion(text)}
+                  type="button"
+                >
+                  {text}
+                </button>
+              ))}
+            </span>
+          ) : null}
         </section>
+      ) : null}
+      {serverSlow ? (
+        <div className="status">
+          Waking the server. Free hosting pauses when idle, so the first request
+          can take up to 30 seconds.
+        </div>
       ) : null}
 
       {error ? <div className="status error">{error}</div> : null}
@@ -292,7 +412,20 @@ function App() {
       ) : null}
       {!repositoriesLoading && repositories.length === 0 ? (
         <div className="status">
-          No repositories are indexed yet. Paste a public GitHub URL above to index one.
+          No repositories are indexed yet. Paste a public GitHub URL above, or
+          pick an example to fill it in:
+          <span className="suggestions">
+            {EXAMPLE_REPOSITORIES.map((url) => (
+              <button
+                className="chip"
+                key={url}
+                onClick={() => setRepositoryUrl(url)}
+                type="button"
+              >
+                {url.replace("https://github.com/", "")}
+              </button>
+            ))}
+          </span>
         </div>
       ) : null}
 
@@ -320,16 +453,26 @@ function App() {
                 onClick={() => setSelectedResult(result)}
                 type="button"
               >
-                <span className="file-path">{result.file_path}</span>
+                <span className="file-path">
+                  <Highlight text={result.file_path} terms={highlightTerms} />
+                </span>
                 <span className="symbol-row">
-                  <strong>{result.symbol_name}</strong>
+                  <strong>
+                    <Highlight text={result.symbol_name} terms={highlightTerms} />
+                  </strong>
                   <span>{result.symbol_type}</span>
+                  {isTestPath(result.file_path) ? <span>test</span> : null}
                 </span>
                 <span className="line-range">
                   Lines {result.start_line}-{result.end_line}
                 </span>
                 {result.docstring ? (
-                  <span className="docstring">{result.docstring}</span>
+                  <span className="docstring">
+                    <Highlight
+                      text={docstringSummary(result.docstring)}
+                      terms={highlightTerms}
+                    />
+                  </span>
                 ) : null}
               </button>
             ))}
@@ -345,12 +488,28 @@ function App() {
               <div className="preview-meta">
                 <span>{selectedResult.file_path}</span>
                 <span>
-                  {selectedResult.symbol_name} · {selectedResult.start_line}-
+                  {selectedResult.symbol_name} · lines {selectedResult.start_line}-
                   {selectedResult.end_line}
+                </span>
+                <span className="preview-actions">
+                  {selectedRepository ? (
+                    <a
+                      href={githubUrl(selectedRepository, selectedResult)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open on GitHub
+                    </a>
+                  ) : null}
+                  <button className="link-button" onClick={copySource} type="button">
+                    {copied ? "Copied" : "Copy code"}
+                  </button>
                 </span>
               </div>
               <pre>
-                <code>{selectedResult.source_code}</code>
+                <code>
+                  <Highlight text={selectedResult.source_code} terms={highlightTerms} />
+                </code>
               </pre>
             </>
           ) : (

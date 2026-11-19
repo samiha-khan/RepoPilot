@@ -288,3 +288,72 @@ code {
     max-height: 440px;
   }
 }
+
+kbd {
+  border: 1px solid #c9d4df;
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: #ffffff;
+  font-size: 0.82em;
+  padding: 1px 6px;
+}
+
+a {
+  color: #2f5d62;
+}
+
+mark {
+  border-radius: 3px;
+  background: #ffe9a8;
+  color: inherit;
+  padding: 0 1px;
+}
+
+pre mark {
+  background: #5b4b12;
+  color: #fff3c4;
+}
+
+.suggestions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.status .suggestions {
+  display: flex;
+  margin-top: 12px;
+}
+
+.chip {
+  min-height: 32px;
+  border: 1px solid #c9d4df;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #2f5d62;
+  font-size: 0.86rem;
+  font-weight: 600;
+  padding: 0 12px;
+}
+
+.chip:hover {
+  border-color: #2f5d62;
+  background: #eef6f5;
+}
+
+.preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.link-button {
+  min-height: 0;
+  background: transparent;
+  color: #2f5d62;
+  font-size: inherit;
+  font-weight: 600;
+  padding: 0;
+  text-decoration: underline;
+}

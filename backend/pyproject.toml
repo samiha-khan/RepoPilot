@@ -1,0 +1,16 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["evaluation/.corpora"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["B008"]  # FastAPI's Depends(...) in default arguments is the documented style
+
+[tool.ruff.lint.per-file-ignores]
+# SQLAlchemy relationship() annotations refer to sibling models by name.
+"app/models/*.py" = ["F821"]

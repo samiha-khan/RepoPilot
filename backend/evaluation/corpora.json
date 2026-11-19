@@ -1,0 +1,33 @@
+{
+  "click": {
+    "url": "https://github.com/pallets/click",
+    "commit": "08b803cf32ceb2ae6a772c62d5da42757a897d44",
+    "scope": "src/click",
+    "split": "dev"
+  },
+  "httpx": {
+    "url": "https://github.com/encode/httpx",
+    "commit": "7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016",
+    "scope": "httpx",
+    "split": "dev"
+  },
+  "requests": {
+    "url": "https://github.com/psf/requests",
+    "commit": "3c7baaa05ab4aa49cc819ce3a819d260de19c157",
+    "scope": "src/requests",
+    "split": "test"
+  },
+  "flask": {
+    "url": "https://github.com/pallets/flask",
+    "commit": "49943b5a94413a530761350f04e896f76e8d620e",
+    "scope": "src/flask",
+    "split": "test"
+  },
+  "repopilot": {
+    "url": "https://github.com/samiha-khan/RepoPilot",
+    "commit": "6bda6547d900a45c264cd124670e9de241e14587",
+    "scope": "backend/app",
+    "split": "test",
+    "note": "RepoPilot itself, frozen at the commit before the BM25F rewrite"
+  }
+}

@@ -34,8 +34,8 @@ def test_load_nonexistent_local_looking_path(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "url",
     [
-        "https://github.com/openai/repopilot",
-        "https://github.com/openai/repopilot.git",
+        "https://github.com/example-org/repopilot",
+        "https://github.com/example-org/repopilot.git",
     ],
 )
 def test_load_valid_github_url(url: str) -> None:
@@ -51,16 +51,16 @@ def test_load_valid_github_url(url: str) -> None:
 
 def test_load_rejects_unsupported_host() -> None:
     with pytest.raises(InvalidRepositorySourceError, match="HTTPS GitHub URL"):
-        RepositoryLoader().load("https://example.com/openai/repopilot")
+        RepositoryLoader().load("https://example.com/example-org/repopilot")
 
 
 @pytest.mark.parametrize(
     "url",
     [
-        "https://github.com/openai",
-        "https://github.com/openai/repopilot/tree/main",
-        "https://github.com/openai/repopilot?tab=readme",
-        "https://github.com/openai/repopilot#readme",
+        "https://github.com/example-org",
+        "https://github.com/example-org/repopilot/tree/main",
+        "https://github.com/example-org/repopilot?tab=readme",
+        "https://github.com/example-org/repopilot#readme",
     ],
 )
 def test_load_rejects_malformed_github_path(url: str) -> None:
@@ -83,6 +83,6 @@ def test_clone_failure_removes_temporary_directory(tmp_path: Path) -> None:
         patch("app.services.repository_loader.Repo.clone_from", side_effect=clone_error),
     ):
         with pytest.raises(RepositoryCloneError, match="Failed to clone repository"):
-            RepositoryLoader().load("https://github.com/openai/repopilot")
+            RepositoryLoader().load("https://github.com/example-org/repopilot")
 
     assert not clone_path.exists()

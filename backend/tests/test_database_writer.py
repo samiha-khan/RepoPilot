@@ -9,6 +9,7 @@ from app.services.database_writer import DatabaseWriteError, DatabaseWriter
 from app.services.python_parser import ParsedCodeChunk
 from app.services.repository_indexer import IndexedSourceFile, RepositoryIndexResult
 
+
 def make_chunk(
     *,
     symbol_name: str = "main",
@@ -55,7 +56,11 @@ def make_indexed_file(
     )
 
 
-def load_repository(session: Session, owner: str = "octocat", name: str = "hello-world") -> Repository:
+def load_repository(
+    session: Session,
+    owner: str = "octocat",
+    name: str = "hello-world",
+) -> Repository:
     repository = session.scalar(
         select(Repository)
         .where(Repository.owner == owner, Repository.name == name)

@@ -171,6 +171,13 @@ def _download_repository_archive(
 
 
 def _extract_repository_archive(archive_path: Path, extract_dir: Path) -> Path:
+    """Extract only the Python files, never writing more than the byte budget.
+
+    The declared sizes are checked first so an oversized archive is refused
+    before anything is written, and the budget is enforced again on the bytes
+    actually decompressed. Files that are not Python are skipped because the
+    indexer never reads them.
+    """
     try:
         with zipfile.ZipFile(archive_path) as archive:
             members = archive.infolist()
@@ -179,16 +186,33 @@ def _extract_repository_archive(archive_path: Path, extract_dir: Path) -> Path:
                     "Repository archive contains too many files."
                 )
 
-            total_size = sum(member.file_size for member in members)
-            if total_size > MAX_EXTRACTED_BYTES:
+            for member in members:
+                _validate_archive_member(member)
+
+            declared_size = sum(
+                member.file_size for member in members if member.filename.endswith(".py")
+            )
+            if declared_size > MAX_EXTRACTED_BYTES:
                 raise RepositoryArchiveTooLargeError(
                     "Repository archive is too large to index."
                 )
 
+            extract_dir.mkdir(parents=True, exist_ok=True)
+            bytes_written = 0
             for member in members:
-                _validate_archive_member(member)
+                if member.is_dir() or not member.filename.endswith(".py"):
+                    continue
 
-            archive.extractall(extract_dir)
+                target = extract_dir / member.filename
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(member) as source, target.open("wb") as destination:
+                    while chunk := source.read(DOWNLOAD_CHUNK_BYTES):
+                        bytes_written += len(chunk)
+                        if bytes_written > MAX_EXTRACTED_BYTES:
+                            raise RepositoryArchiveTooLargeError(
+                                "Repository archive is too large to index."
+                            )
+                        destination.write(chunk)
     except zipfile.BadZipFile as exc:
         raise RepositoryArchiveError("Repository archive is not a valid zip file.") from exc
 

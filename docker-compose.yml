@@ -27,12 +27,12 @@ services:
         condition: service_healthy
 
   db:
-    image: pgvector/pgvector:pg16
+    image: postgres:16
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-repofix}
-      POSTGRES_TEST_DB: ${POSTGRES_TEST_DB:-repofix_test}
-      POSTGRES_USER: ${POSTGRES_USER:-repofix}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-repofix}
+      POSTGRES_DB: ${POSTGRES_DB:-repopilot}
+      POSTGRES_TEST_DB: ${POSTGRES_TEST_DB:-repopilot_test}
+      POSTGRES_USER: ${POSTGRES_USER:-repopilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-repopilot}
     ports:
       - "5433:5432"
     volumes:

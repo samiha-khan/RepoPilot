@@ -216,3 +216,33 @@ def test_index_public_github_repository_returns_clean_not_found_error(monkeypatc
 
     with pytest.raises(RepositoryArchiveNotFoundError):
         index_public_github_repository("https://github.com/octocat/private")
+
+
+def test_extraction_refuses_python_content_over_the_byte_budget(tmp_path, monkeypatch) -> None:
+    import zipfile
+
+    from app.services import public_repository_indexer as module
+
+    archive_path = tmp_path / "big.zip"
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("repo-abc/big.py", "#" * 5_000_000)
+    assert archive_path.stat().st_size < 100_000  # tiny on disk, large once extracted
+
+    monkeypatch.setattr(module, "MAX_EXTRACTED_BYTES", 1_000_000)
+    with pytest.raises(RepositoryArchiveTooLargeError):
+        module._extract_repository_archive(archive_path, tmp_path / "out")
+
+
+def test_extraction_skips_files_that_are_not_python(tmp_path) -> None:
+    import zipfile
+
+    from app.services import public_repository_indexer as module
+
+    archive_path = tmp_path / "repo.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("repo-abc/app.py", "x = 1\n")
+        archive.writestr("repo-abc/logo.png", b"\x89PNG")
+        archive.writestr("repo-abc/data/notes.txt", "hello")
+
+    root = module._extract_repository_archive(archive_path, tmp_path / "out")
+    assert sorted(path.name for path in root.rglob("*") if path.is_file()) == ["app.py"]

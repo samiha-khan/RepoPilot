@@ -6,6 +6,10 @@ import typer
 from git import GitCommandError, InvalidGitRepositoryError, NoSuchPathError, Repo
 
 from app.services.database_writer import DatabaseWriteError, DatabaseWriter
+from app.services.public_repository_indexer import (
+    PublicRepositoryIndexError,
+    index_public_github_repository,
+)
 from app.services.repository_indexer import RepositoryIndexer
 from app.services.repository_loader import (
     InvalidRepositorySourceError,
@@ -73,6 +77,36 @@ def index(
     typer.echo(f"Code chunks: {result.total_chunks}")
     typer.echo(f"Skipped files: {result.skipped_files}")
     typer.echo(f"Persisted repository ID: {persisted_repository.id}")
+
+
+DEMO_REPOSITORIES = (
+    "https://github.com/psf/requests",
+    "https://github.com/pallets/flask",
+    "https://github.com/pallets/click",
+)
+
+
+@app.command()
+def seed(
+    urls: list[str] | None = typer.Argument(
+        None, help="GitHub URLs to index. Defaults to a few well-known libraries."
+    ),
+) -> None:
+    """Index a set of public repositories so a fresh deployment is not empty."""
+    failures = 0
+    for url in urls or DEMO_REPOSITORIES:
+        try:
+            summary = index_public_github_repository(url)
+        except PublicRepositoryIndexError as exc:
+            failures += 1
+            typer.secho(f"{url}: {exc}", fg=typer.colors.RED, err=True)
+            continue
+        typer.echo(
+            f"{url}: {summary.total_files} files, {summary.total_chunks} chunks"
+        )
+
+    if failures:
+        raise typer.Exit(code=1)
 
 
 def _resolve_repository_metadata(

@@ -38,6 +38,18 @@ class SearchConfig:
     # A symbol whose name equals the query (ignoring case) is ranked above
     # every other result; BM25F decides the order within each group.
     exact_symbol_first: bool = True
+    # Pseudo-relevance feedback. 0 documents means off, which is the default:
+    # it was measured and made ranking slightly worse (docs/search-evaluation.md).
+    # Kept so the experiment can be re-run with `python -m evaluation.run prf`.
+    # Otherwise the top ``prf_docs`` results contribute up to ``prf_terms`` extra query terms,
+    # each weighted at most ``prf_weight`` against 1.0 for a typed term.
+    prf_docs: int = 0
+    prf_terms: int = 10
+    prf_weight: float = 0.3
+
+    # Results from test files come after results from the rest of the code,
+    # unless the query itself mentions "test".
+    tests_last: bool = True
     # "summary": a class is indexed by its own header, docstring, class-level
     # statements and method names, not by the bodies of its methods (those are
     # separate chunks). "full": index the whole class source.

@@ -189,3 +189,30 @@ def test_nested_class_is_out_of_scope_for_now() -> None:
     )
 
     assert [chunk.symbol_name for chunk in chunks] == ["Outer", "method"]
+
+
+def test_parse_source_skips_overload_stubs_but_keeps_the_implementation() -> None:
+    source = (
+        "from typing import overload\n"
+        "import typing\n"
+        "\n"
+        "@overload\n"
+        "def load(x: int) -> int: ...\n"
+        "@typing.overload\n"
+        "def load(x: str) -> str: ...\n"
+        "def load(x):\n"
+        "    return x\n"
+        "\n"
+        "class Box:\n"
+        "    @overload\n"
+        "    def get(self, a: int) -> int: ...\n"
+        "    def get(self, a):\n"
+        "        return a\n"
+    )
+    chunks = parse_source(source)
+    assert [(c.symbol_name, c.symbol_type) for c in chunks] == [
+        ("load", "function"),
+        ("Box", "class"),
+        ("get", "method"),
+    ]
+    assert "return x" in chunks[0].source_code

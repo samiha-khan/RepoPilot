@@ -98,3 +98,33 @@ def test_api_search_honours_limit(db_session: Session, repository: Repository) -
         assert client.get(url, params={"q": "alpha", "limit": 201}).status_code == 422
     finally:
         app.dependency_overrides.clear()
+
+
+def test_suggestions_come_from_public_docstrings_and_are_stable(
+    db_session: Session, repository: Repository
+) -> None:
+    source_file = repository.source_files[0]
+    docs = {
+        "fetch_user": "Fetch a user record from the database.",
+        "_private": "Hidden helper that should never be suggested.",
+        "short": "Too short.",
+    }
+    source_file.code_chunks.extend(
+        CodeChunk(symbol_name=name, symbol_type="function", start_line=20 + i, end_line=20 + i,
+                  source_code="pass", docstring=text)
+        for i, (name, text) in enumerate(docs.items())
+    )
+    test_file = SourceFile(repository=repository, path="tests/test_x.py", language="python",
+                           sha256="c" * 64, size=1)
+    test_file.code_chunks = [
+        CodeChunk(symbol_name="check", symbol_type="function", start_line=1, end_line=1,
+                  source_code="pass", docstring="Check that the thing works as intended.")
+    ]
+    db_session.add(test_file)
+    db_session.commit()
+
+    first = repository_queries.suggest_queries(db_session, repository)
+    assert first == ["Fetch a user record from the database"]
+    assert repository_queries.suggest_queries(db_session, repository) == first
+    hits = repository_queries.search_repository_code(db_session, repository, first[0])
+    assert hits[0][1].symbol_name == "fetch_user"

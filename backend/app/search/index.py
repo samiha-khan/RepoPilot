@@ -3,6 +3,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from app.search.config import DEFAULT_CONFIG, SearchConfig
+from app.search.text import is_test_path
 from app.search.tokenizer import tokenize
 
 FIELDS = ("name", "path", "docstring", "body")
@@ -42,6 +43,7 @@ class SearchIndex:
     def __init__(self, records: list[ChunkRecord], config: SearchConfig = DEFAULT_CONFIG):
         self.config = config
         self._records = records
+        self._members = _methods_by_class(records)
         # term -> [(document index, length-normalised tf per field)]
         self._postings: dict[str, list[tuple[int, tuple[float, ...]]]] = {}
         self._field_weights = (
@@ -51,6 +53,7 @@ class SearchIndex:
             config.weight_body,
         )
         self._idf: dict[str, float] = {}
+        self._average_lengths: dict[str, float] = dict.fromkeys(FIELDS, 1.0)
         self._build()
 
     def __len__(self) -> int:
@@ -58,49 +61,28 @@ class SearchIndex:
 
     def search(self, query: str, limit: int | None = None) -> list[ChunkRecord]:
         config = self.config
-        query_terms = set(
-            tokenize(
-                query,
-                split_identifiers=config.split_identifiers,
-                stem=config.stem,
-                drop_stopwords=config.drop_query_stopwords,
-            )
-        )
+        query_terms = self._tokens(query, drop_stopwords=config.drop_query_stopwords)
         if not query_terms:
             # A query made only of stopwords should still return something.
-            query_terms = set(
-                tokenize(
-                    query,
-                    split_identifiers=config.split_identifiers,
-                        stem=config.stem,
-                )
-            )
+            query_terms = self._tokens(query)
 
-        scores: dict[int, float] = {}
-        for term in query_terms:
-            idf = self._idf.get(term)
-            if idf is None:
-                continue
-            for doc_index, field_tf in self._postings[term]:
-                if config.combine == "bm25f":
-                    weighted_tf = sum(
-                        w * tf for w, tf in zip(self._field_weights, field_tf, strict=True)
-                    )
-                    contribution = weighted_tf / (config.k1 + weighted_tf)
-                else:
-                    contribution = sum(
-                        w * tf / (config.k1 + tf)
-                        for w, tf in zip(self._field_weights, field_tf, strict=False)
-                    )
-                scores[doc_index] = scores.get(doc_index, 0.0) + idf * contribution
+        weights = dict.fromkeys(set(query_terms), 1.0)
+        scores = self._score(weights)
+        if config.prf_docs and scores:
+            expansion = self._expansion_terms(scores, set(weights))
+            if expansion:
+                weights.update(expansion)
+                scores = self._score(weights)
 
         exact_name = query.strip().lower() if config.exact_symbol_first else None
+        tests_last = config.tests_last and "test" not in query.lower()
 
         # Equal scores are ordered by location so results are deterministic.
         ranked = sorted(
             scores,
             key=lambda i: (
                 self._records[i].symbol_name.lower() != exact_name,
+                tests_last and is_test_path(self._records[i].path),
                 -scores[i],
                 self._records[i].path,
                 self._records[i].start_line,
@@ -112,54 +94,104 @@ class SearchIndex:
             ranked = ranked[:limit]
         return [self._records[i] for i in ranked]
 
-    def _build(self) -> None:
+    def _tokens(self, text: str, *, drop_stopwords: bool = False) -> list[str]:
+        return tokenize(
+            text,
+            split_identifiers=self.config.split_identifiers,
+            stem=self.config.stem,
+            drop_stopwords=drop_stopwords,
+        )
+
+    def _score(self, term_weights: dict[str, float]) -> dict[int, float]:
         config = self.config
-        b_values = {
-            "name": config.b_name,
-            "path": config.b_path,
-            "docstring": config.b_docstring,
-            "body": config.b_body,
+        scores: dict[int, float] = {}
+        for term, query_weight in term_weights.items():
+            idf = self._idf.get(term)
+            if idf is None:
+                continue
+            for doc_index, field_tf in self._postings[term]:
+                scores[doc_index] = scores.get(doc_index, 0.0) + (
+                    query_weight * idf * self._saturate(field_tf, config)
+                )
+        return scores
+
+    def _saturate(self, field_tf: tuple[float, ...], config: SearchConfig) -> float:
+        if config.combine == "bm25f":
+            weighted_tf = sum(w * tf for w, tf in zip(self._field_weights, field_tf, strict=True))
+            return weighted_tf / (config.k1 + weighted_tf)
+        return sum(
+            w * tf / (config.k1 + tf) for w, tf in zip(self._field_weights, field_tf, strict=True)
+        )
+
+    def _expansion_terms(self, scores: dict[int, float], query_terms: set[str]) -> dict[str, float]:
+        """Pseudo-relevance feedback: add terms that the top results share.
+
+        The best ``prf_docs`` results are assumed relevant. Each of their terms
+        is scored by idf times its saturated weight in those documents, and
+        the best ``prf_terms`` terms not already in the query are added with a
+        weight of ``prf_weight`` times their share of the best term's score.
+        This is the idea behind relevance models (Lavrenko and Croft, 2001)
+        and their query-interpolated form (Abdul-Jaleel et al., 2004), in a
+        simpler form without language-model probabilities.
+        """
+        config = self.config
+        top = sorted(scores, key=lambda i: (-scores[i], i))[: config.prf_docs]
+        gathered: dict[str, float] = {}
+        for doc_index in top:
+            for term, field_tf in self._document_vector(doc_index).items():
+                if term in query_terms or term not in self._idf:
+                    continue
+                gathered[term] = gathered.get(term, 0.0) + self._idf[term] * self._saturate(
+                    tuple(field_tf), config
+                )
+
+        best = sorted(gathered, key=lambda t: (-gathered[t], t))[: config.prf_terms]
+        if not best:
+            return {}
+        peak = gathered[best[0]]
+        return {term: config.prf_weight * gathered[term] / peak for term in best}
+
+    def _document_vector(self, doc_index: int) -> dict[str, list[float]]:
+        return self._vector(self._counts(self._records[doc_index]))
+
+    def _counts(self, record: ChunkRecord) -> dict[str, Counter[str]]:
+        return {
+            field: Counter(self._tokens(text))
+            for field, text in self._field_texts(record).items()
         }
 
-        field_counts: list[dict[str, Counter[str]]] = []
-        length_totals = dict.fromkeys(FIELDS, 0)
-        document_frequency: Counter[str] = Counter()
+    def _vector(self, counts: dict[str, Counter[str]]) -> dict[str, list[float]]:
+        """Length-normalised term frequencies of one document, one value per field."""
+        config = self.config
+        b_values = (config.b_name, config.b_path, config.b_docstring, config.b_body)
+        vectors: dict[str, list[float]] = {}
+        for position, field in enumerate(FIELDS):
+            counter = counts[field]
+            length = sum(counter.values())
+            b = b_values[position]
+            normaliser = 1 - b + b * length / self._average_lengths[field]
+            for term, frequency in counter.items():
+                vectors.setdefault(term, [0.0] * len(FIELDS))[position] = frequency / normaliser
+        return vectors
 
-        for text_by_field in self._field_texts():
-            counts = {
-                field: Counter(
-                    tokenize(
-                        text,
-                        split_identifiers=config.split_identifiers,
-                                stem=config.stem,
-                    )
-                )
-                for field, text in text_by_field.items()
-            }
+    def _build(self) -> None:
+        field_counts = [self._counts(record) for record in self._records]
+        document_count = len(field_counts)
+
+        document_frequency: Counter[str] = Counter()
+        length_totals = dict.fromkeys(FIELDS, 0)
+        for counts in field_counts:
+            document_frequency.update(set().union(*counts.values()))
             for field, counter in counts.items():
                 length_totals[field] += sum(counter.values())
-            document_frequency.update(set().union(*counts.values()))
-            field_counts.append(counts)
 
-        document_count = len(field_counts)
-        average_lengths = {
-            field: (length_totals[field] / document_count) or 1.0
-            for field in FIELDS
-        } if document_count else dict.fromkeys(FIELDS, 1.0)
+        if document_count:
+            self._average_lengths = {
+                field: (length_totals[field] / document_count) or 1.0 for field in FIELDS
+            }
 
         for doc_index, counts in enumerate(field_counts):
-            vectors: dict[str, list[float]] = {}
-            for position, field in enumerate(FIELDS):
-                counter = counts[field]
-                length = sum(counter.values())
-                normaliser = (
-                    1 - b_values[field] + b_values[field] * length / average_lengths[field]
-                )
-                for term, frequency in counter.items():
-                    vectors.setdefault(term, [0.0] * len(FIELDS))[position] = (
-                        frequency / normaliser
-                    )
-            for term, vector in vectors.items():
+            for term, vector in self._vector(counts).items():
                 self._postings.setdefault(term, []).append((doc_index, tuple(vector)))
 
         for term, containing in document_frequency.items():
@@ -167,19 +199,17 @@ class SearchIndex:
                 1 + (document_count - containing + 0.5) / (containing + 0.5)
             )
 
-    def _field_texts(self):
-        members = _methods_by_class(self._records)
-        for record in self._records:
-            if self.config.class_body == "summary" and record.symbol_type == "class":
-                body = _class_summary(record, members.get(record.chunk_id, []))
-            else:
-                body = record.source_code
-            yield {
-                "name": record.symbol_name,
-                "path": _path_text(record.path),
-                "docstring": record.docstring or "",
-                "body": body,
-            }
+    def _field_texts(self, record: ChunkRecord) -> dict[str, str]:
+        if self.config.class_body == "summary" and record.symbol_type == "class":
+            body = _class_summary(record, self._members.get(record.chunk_id, []))
+        else:
+            body = record.source_code
+        return {
+            "name": record.symbol_name,
+            "path": _path_text(record.path),
+            "docstring": record.docstring or "",
+            "body": body,
+        }
 
 
 def _path_text(path: str) -> str:

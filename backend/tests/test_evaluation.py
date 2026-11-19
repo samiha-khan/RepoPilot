@@ -1,11 +1,11 @@
 import math
 
 from app.search import ChunkRecord
+from app.search.text import first_sentence
 from evaluation import metrics
 from evaluation.synthetic import (
     build_benchmark,
     build_identifier_benchmark,
-    first_sentence,
     strip_docstring,
 )
 

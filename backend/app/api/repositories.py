@@ -76,6 +76,19 @@ def list_repository_files(
     return repository_queries.list_repository_files(db, repository)
 
 
+@router.get("/repositories/{repository_id}/suggestions", response_model=list[str])
+def suggest_queries(
+    repository_id: int,
+    limit: Annotated[int, Query(ge=1, le=10)] = 4,
+    db: Session = Depends(get_db),
+) -> list[str]:
+    repository = repository_queries.get_repository(db, repository_id)
+    if repository is None:
+        raise HTTPException(status_code=404, detail="Repository not found.")
+
+    return repository_queries.suggest_queries(db, repository, limit)
+
+
 @router.get(
     "/repositories/{repository_id}/search",
     response_model=list[CodeSearchResultResponse],

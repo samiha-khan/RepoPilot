@@ -178,3 +178,28 @@ def test_equal_scores_are_ordered_by_location() -> None:
 def test_limit_truncates_results() -> None:
     records = [make_record(i, "same", start_line=i) for i in range(1, 6)]
     assert len(SearchIndex(records).search("same", limit=2)) == 2
+
+
+def test_test_files_come_after_library_code_unless_the_query_mentions_tests() -> None:
+    records = [
+        make_record(1, "parse_header", path="tests/test_utils.py", docstring="parse a header"),
+        make_record(2, "parse_header_value", path="lib/utils.py", source_code="x"),
+    ]
+    assert [r.path for r in SearchIndex(records).search("parse header")] == [
+        "lib/utils.py",
+        "tests/test_utils.py",
+    ]
+    assert SearchIndex(records).search("test parse header")[0].path == "tests/test_utils.py"
+    off = replace(DEFAULT_CONFIG, tests_last=False)
+    assert SearchIndex(records, off).search("parse header")[0].path == "tests/test_utils.py"
+
+
+def test_pseudo_relevance_feedback_adds_terms_from_top_results() -> None:
+    records = [
+        make_record(1, "alpha_widget", source_code="gizmo gizmo gizmo"),
+        make_record(2, "only_gizmo", source_code="gizmo"),
+        make_record(3, "unrelated", source_code="nothing here"),
+    ]
+    assert "only_gizmo" not in names(SearchIndex(records).search("alpha"))
+    config = replace(DEFAULT_CONFIG, prf_docs=1, prf_terms=3, prf_weight=0.5)
+    assert names(SearchIndex(records, config).search("alpha"))[:2] == ["alpha_widget", "only_gizmo"]

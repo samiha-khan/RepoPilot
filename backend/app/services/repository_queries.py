@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import CodeChunk, Repository, SourceFile
 from app.search import DEFAULT_CONFIG, ChunkRecord, SearchConfig, SearchIndex
+from app.search.text import first_sentence, is_test_path
 
 # Building an index tokenises every chunk of a repository, so built indexes
 # are kept in memory and reused until the stored chunks change.
@@ -130,3 +131,37 @@ def _load_chunk_records(db: Session, repository: Repository) -> list[ChunkRecord
         .order_by(SourceFile.path, CodeChunk.start_line, CodeChunk.id)
     )
     return [ChunkRecord(*row) for row in rows]
+
+
+def suggest_queries(db: Session, repository: Repository, limit: int = 4) -> list[str]:
+    """Example searches taken from the repository's own docstrings.
+
+    Each suggestion is the first sentence of a public function's docstring,
+    so it is a real description of something in the code and will return that
+    function. Candidates are spread evenly over the sorted file paths so the
+    examples do not all come from one module. Nothing is random: the same
+    repository always gives the same suggestions.
+    """
+    rows = db.execute(
+        select(SourceFile.path, CodeChunk.symbol_name, CodeChunk.docstring)
+        .join(CodeChunk, CodeChunk.source_file_id == SourceFile.id)
+        .where(SourceFile.repository_id == repository.id)
+        .where(CodeChunk.docstring.is_not(None))
+        .where(CodeChunk.symbol_type.in_(["function", "async_function", "method", "async_method"]))
+        .order_by(SourceFile.path, CodeChunk.start_line)
+    )
+    seen: set[str] = set()
+    candidates: list[str] = []
+    for path, symbol_name, docstring in rows:
+        if symbol_name.startswith("_") or is_test_path(path):
+            continue
+        sentence = first_sentence(docstring)
+        if not 4 <= len(sentence.split()) <= 12 or sentence.lower() in seen:
+            continue
+        seen.add(sentence.lower())
+        candidates.append(sentence)
+
+    if len(candidates) <= limit:
+        return candidates
+    step = len(candidates) / limit
+    return [candidates[int(i * step)] for i in range(limit)]

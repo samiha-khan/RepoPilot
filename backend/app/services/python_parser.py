@@ -43,6 +43,8 @@ def parse_source(source: str) -> list[ParsedCodeChunk]:
 
     chunks: list[ParsedCodeChunk] = []
     for node in module.body:
+        if _is_overload_stub(node):
+            continue
         if isinstance(node, ast.FunctionDef):
             chunks.append(_build_chunk(source, node, "function"))
         elif isinstance(node, ast.AsyncFunctionDef):
@@ -58,12 +60,32 @@ def parse_source(source: str) -> list[ParsedCodeChunk]:
 def _parse_class_methods(source: str, class_node: ast.ClassDef) -> list[ParsedCodeChunk]:
     chunks: list[ParsedCodeChunk] = []
     for node in class_node.body:
+        if _is_overload_stub(node):
+            continue
         if isinstance(node, ast.FunctionDef):
             chunks.append(_build_chunk(source, node, "method"))
         elif isinstance(node, ast.AsyncFunctionDef):
             chunks.append(_build_chunk(source, node, "async_method"))
 
     return chunks
+
+
+def _is_overload_stub(node: ast.AST) -> bool:
+    """True for ``@overload`` signatures, which only exist for type checkers.
+
+    Each overload has no body of its own and repeats the name of the real
+    implementation, so indexing them shows the same function several times.
+    """
+    if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        return False
+    for decorator in node.decorator_list:
+        if isinstance(decorator, ast.Attribute):
+            name = decorator.attr
+        else:
+            name = getattr(decorator, "id", "")
+        if name == "overload":
+            return True
+    return False
 
 
 def _build_chunk(

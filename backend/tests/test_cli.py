@@ -204,3 +204,33 @@ def test_index_command_database_write_failure_exits_nonzero(tmp_path: Path) -> N
     assert result.exit_code == 1
     assert result.stdout == ""
     assert result.stderr == "Indexing failed: write failed\n"
+
+
+def test_seed_indexes_each_url_and_reports_counts() -> None:
+    from app.cli import DEMO_REPOSITORIES
+
+    runner = CliRunner()
+    summary = SimpleNamespace(total_files=3, total_chunks=9)
+    with patch("app.cli.index_public_github_repository", return_value=summary) as index:
+        result = runner.invoke(app, ["seed"])
+
+    assert result.exit_code == 0
+    assert index.call_count == len(DEMO_REPOSITORIES)
+    assert "3 files, 9 chunks" in result.output
+
+
+def test_seed_keeps_going_after_a_failure_and_exits_nonzero() -> None:
+    from app.services.public_repository_indexer import PublicRepositoryIndexError
+
+    runner = CliRunner()
+    summary = SimpleNamespace(total_files=1, total_chunks=2)
+    outcomes = [PublicRepositoryIndexError("rate limited"), summary]
+    with patch("app.cli.index_public_github_repository", side_effect=outcomes) as index:
+        result = runner.invoke(
+            app, ["seed", "https://github.com/a/one", "https://github.com/b/two"]
+        )
+
+    assert result.exit_code == 1
+    assert index.call_count == 2
+    assert "rate limited" in result.output
+    assert "1 files, 2 chunks" in result.output

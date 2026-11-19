@@ -3,15 +3,15 @@
 
 | variant | MRR | ΔMRR vs current [95% CI] |
 |---|---|---|
-| current | 0.492 | |
-| previous ranker | 0.315 | -0.178 [-0.229, -0.127] |
-| no stemming | 0.430 | -0.062 [-0.103, -0.024] |
-| keep query stopwords | 0.385 | -0.108 [-0.139, -0.080] |
-| no identifier splitting | 0.253 | -0.240 [-0.300, -0.185] |
-| no exact-name priority | 0.492 | +0.000 [+0.000, +0.000] |
-| class indexed by full source | 0.500 | +0.008 [-0.014, +0.031] |
-| per-field saturation (linear) | 0.434 | -0.058 [-0.094, -0.020] |
-| equal field weights | 0.450 | -0.042 [-0.083, -0.003] |
+| current | 0.490 | |
+| previous ranker | 0.318 | -0.173 [-0.223, -0.123] |
+| no stemming | 0.435 | -0.055 [-0.094, -0.019] |
+| keep query stopwords | 0.385 | -0.105 [-0.134, -0.078] |
+| no identifier splitting | 0.254 | -0.236 [-0.295, -0.183] |
+| no exact-name priority | 0.490 | +0.000 [+0.000, +0.000] |
+| class indexed by full source | 0.507 | +0.016 [-0.007, +0.039] |
+| per-field saturation (linear) | 0.447 | -0.043 [-0.079, -0.005] |
+| equal field weights | 0.449 | -0.042 [-0.080, -0.004] |
 
 ### httpx (synthetic)
 
@@ -31,29 +31,29 @@
 
 | variant | MRR | ΔMRR vs current [95% CI] |
 |---|---|---|
-| current | 0.633 | |
-| previous ranker | 0.524 | -0.109 [-0.175, -0.045] |
-| no stemming | 0.595 | -0.038 [-0.090, +0.012] |
-| keep query stopwords | 0.584 | -0.049 [-0.084, -0.015] |
-| no identifier splitting | 0.401 | -0.232 [-0.313, -0.151] |
-| no exact-name priority | 0.633 | +0.000 [+0.000, +0.000] |
-| class indexed by full source | 0.613 | -0.020 [-0.037, -0.005] |
-| per-field saturation (linear) | 0.604 | -0.029 [-0.063, +0.004] |
-| equal field weights | 0.549 | -0.084 [-0.131, -0.041] |
+| current | 0.622 | |
+| previous ranker | 0.529 | -0.093 [-0.161, -0.030] |
+| no stemming | 0.593 | -0.029 [-0.082, +0.022] |
+| keep query stopwords | 0.575 | -0.047 [-0.080, -0.014] |
+| no identifier splitting | 0.408 | -0.214 [-0.298, -0.132] |
+| no exact-name priority | 0.622 | +0.000 [+0.000, +0.000] |
+| class indexed by full source | 0.613 | -0.009 [-0.026, +0.007] |
+| per-field saturation (linear) | 0.607 | -0.015 [-0.050, +0.019] |
+| equal field weights | 0.538 | -0.084 [-0.129, -0.040] |
 
 ### flask (synthetic)
 
 | variant | MRR | ΔMRR vs current [95% CI] |
 |---|---|---|
-| current | 0.542 | |
-| previous ranker | 0.420 | -0.122 [-0.177, -0.071] |
-| no stemming | 0.505 | -0.038 [-0.076, +0.001] |
-| keep query stopwords | 0.428 | -0.114 [-0.150, -0.079] |
-| no identifier splitting | 0.224 | -0.318 [-0.380, -0.255] |
-| no exact-name priority | 0.542 | +0.000 [+0.000, +0.000] |
-| class indexed by full source | 0.527 | -0.015 [-0.035, +0.004] |
-| per-field saturation (linear) | 0.506 | -0.036 [-0.077, +0.002] |
-| equal field weights | 0.445 | -0.097 [-0.137, -0.058] |
+| current | 0.548 | |
+| previous ranker | 0.420 | -0.128 [-0.185, -0.078] |
+| no stemming | 0.502 | -0.046 [-0.086, -0.006] |
+| keep query stopwords | 0.432 | -0.116 [-0.155, -0.082] |
+| no identifier splitting | 0.224 | -0.324 [-0.386, -0.259] |
+| no exact-name priority | 0.548 | +0.000 [+0.000, +0.000] |
+| class indexed by full source | 0.523 | -0.025 [-0.044, -0.007] |
+| per-field saturation (linear) | 0.510 | -0.038 [-0.078, -0.001] |
+| equal field weights | 0.447 | -0.101 [-0.142, -0.059] |
 
 ### click (identifier lookup)
 
@@ -63,8 +63,8 @@
 | previous ranker | 1.000 | +0.000 [+0.000, +0.000] |
 | no stemming | 1.000 | +0.000 [+0.000, +0.000] |
 | keep query stopwords | 1.000 | +0.000 [+0.000, +0.000] |
-| no identifier splitting | 0.997 | -0.003 [-0.009, +0.000] |
-| no exact-name priority | 0.955 | -0.045 [-0.064, -0.028] |
+| no identifier splitting | 0.998 | -0.002 [-0.006, +0.000] |
+| no exact-name priority | 0.951 | -0.049 [-0.068, -0.031] |
 | class indexed by full source | 1.000 | +0.000 [+0.000, +0.000] |
 | per-field saturation (linear) | 1.000 | +0.000 [+0.000, +0.000] |
 | equal field weights | 1.000 | +0.000 [+0.000, +0.000] |
@@ -92,7 +92,7 @@
 | no stemming | 1.000 | +0.000 [+0.000, +0.000] |
 | keep query stopwords | 1.000 | +0.000 [+0.000, +0.000] |
 | no identifier splitting | 1.000 | +0.000 [+0.000, +0.000] |
-| no exact-name priority | 0.943 | -0.057 [-0.087, -0.030] |
+| no exact-name priority | 0.942 | -0.058 [-0.088, -0.034] |
 | class indexed by full source | 1.000 | +0.000 [+0.000, +0.000] |
 | per-field saturation (linear) | 1.000 | +0.000 [+0.000, +0.000] |
 | equal field weights | 1.000 | +0.000 [+0.000, +0.000] |
@@ -106,7 +106,7 @@
 | no stemming | 1.000 | +0.000 [+0.000, +0.000] |
 | keep query stopwords | 1.000 | +0.000 [+0.000, +0.000] |
 | no identifier splitting | 1.000 | +0.000 [+0.000, +0.000] |
-| no exact-name priority | 0.899 | -0.101 [-0.135, -0.072] |
+| no exact-name priority | 0.900 | -0.100 [-0.132, -0.071] |
 | class indexed by full source | 1.000 | +0.000 [+0.000, +0.000] |
 | per-field saturation (linear) | 1.000 | +0.000 [+0.000, +0.000] |
 | equal field weights | 1.000 | +0.000 [+0.000, +0.000] |
@@ -129,15 +129,15 @@
 
 | variant | MRR | ΔMRR vs current [95% CI] |
 |---|---|---|
-| current | 0.900 | |
-| previous ranker | 0.729 | -0.171 [-0.324, -0.043] |
-| no stemming | 0.872 | -0.028 [-0.083, +0.000] |
-| keep query stopwords | 0.907 | +0.007 [+0.000, +0.022] |
-| no identifier splitting | 0.708 | -0.192 [-0.375, -0.033] |
-| no exact-name priority | 0.900 | +0.000 [+0.000, +0.000] |
-| class indexed by full source | 0.900 | +0.000 [+0.000, +0.000] |
-| per-field saturation (linear) | 0.843 | -0.057 [-0.185, +0.033] |
-| equal field weights | 0.861 | -0.039 [-0.150, +0.056] |
+| current | 0.907 | |
+| previous ranker | 0.729 | -0.178 [-0.329, -0.056] |
+| no stemming | 0.880 | -0.028 [-0.083, +0.000] |
+| keep query stopwords | 0.907 | +0.000 [+0.000, +0.000] |
+| no identifier splitting | 0.708 | -0.199 [-0.375, -0.046] |
+| no exact-name priority | 0.907 | +0.000 [+0.000, +0.000] |
+| class indexed by full source | 0.907 | +0.000 [+0.000, +0.000] |
+| per-field saturation (linear) | 0.843 | -0.065 [-0.185, +0.019] |
+| equal field weights | 0.866 | -0.042 [-0.153, +0.056] |
 
 ### repopilot (hand-labelled)
 

@@ -5,6 +5,7 @@
     python -m evaluation.run synthetic    # docstring queries on each corpus
     python -m evaluation.run ablate       # switch one design decision off at a time
     python -m evaluation.run tune         # grid search over field weights (dev split only)
+    python -m evaluation.run prf          # pseudo-relevance feedback: tune on dev, report on all
 
 Run from the ``backend`` directory.
 """
@@ -258,6 +259,84 @@ def command_tune(_args) -> None:
     print(f"worst grid point: {results[-1][1]} at {results[-1][0]:.4f}")
 
 
+PRF_GRID = {
+    "prf_docs": [3, 5, 10],
+    "prf_terms": [5, 10, 20],
+    "prf_weight": [0.1, 0.3, 0.5],
+}
+
+
+def command_prf(_args) -> None:
+    """Pseudo-relevance feedback is chosen on the dev corpora, then reported everywhere."""
+    dev = {
+        name: synthetic_benchmark(name)
+        for name, spec in corpora.load_specs().items()
+        if spec["split"] == "dev"
+    }
+
+    def dev_mrr(config: SearchConfig) -> float:
+        values = []
+        for records, queries in dev.values():
+            outcome = run_synthetic(new_ranker(records, config), queries)
+            values.append(sum(outcome.reciprocal_ranks) / len(outcome.ranks))
+        return sum(values) / len(values)
+
+    baseline = dev_mrr(DEFAULT_CONFIG)
+    results = []
+    for values in itertools.product(*PRF_GRID.values()):
+        config = replace(DEFAULT_CONFIG, **dict(zip(PRF_GRID, values, strict=True)))
+        results.append((dev_mrr(config), values))
+    results.sort(reverse=True)
+
+    print(f"dev corpora: {', '.join(dev)} | mean MRR; feedback off = {baseline:.4f}\n")
+    print("| rank | docs | terms | weight | dev MRR |\n|---|---|---|---|---|")
+    for position, (mrr, values) in enumerate(results[:8], start=1):
+        print(f"| {position} | " + " | ".join(str(v) for v in values) + f" | {mrr:.4f} |")
+    print(f"\nworst grid point: {results[-1][1]} at {results[-1][0]:.4f}")
+
+    best = replace(DEFAULT_CONFIG, **dict(zip(PRF_GRID, results[0][1], strict=True)))
+    print(f"\nbest dev setting {results[0][1]} against feedback off, every corpus:\n")
+    print("| workload | MRR off | MRR on | difference [95% CI] |\n|---|---|---|---|")
+    for name, spec in corpora.load_specs().items():
+        records, queries = synthetic_benchmark(name)
+        if queries:
+            _print_prf_row(
+                f"{name} docstring [{spec['split']}]",
+                records,
+                lambda s, q=queries: run_synthetic(s, q),
+                best,
+            )
+        records, queries = identifier_benchmark(name)
+        if queries:
+            _print_prf_row(
+                f"{name} identifier [{spec['split']}]",
+                records,
+                lambda s, q=queries: run_synthetic(s, q),
+                best,
+            )
+    _print_prf_row(
+        "requests hand-labelled [test]",
+        external_records("requests"),
+        lambda s: run_hand_labelled(s, REQUESTS_QUERIES),
+        best,
+    )
+    _print_prf_row(
+        "repopilot hand-labelled [test]",
+        self_records(),
+        lambda s: run_hand_labelled(s, REPOPILOT_QUERIES),
+        best,
+    )
+
+
+def _print_prf_row(label: str, records, evaluate, config: SearchConfig) -> None:
+    off = evaluate(new_ranker(records))
+    on = evaluate(new_ranker(records, config))
+    mean, low, high = metrics.paired_bootstrap_difference(on.reciprocal_ranks, off.reciprocal_ranks)
+    off_mrr = sum(off.reciprocal_ranks) / len(off.ranks)
+    on_mrr = sum(on.reciprocal_ranks) / len(on.ranks)
+    print(f"| {label} | {off_mrr:.3f} | {on_mrr:.3f} | {mean:+.3f} [{low:+.3f}, {high:+.3f}] |")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter
@@ -270,6 +349,7 @@ def main() -> None:
         ("synthetic", command_synthetic),
         ("ablate", command_ablate),
         ("tune", command_tune),
+        ("prf", command_prf),
     ]:
         commands.add_parser(name).set_defaults(function=function)
     arguments = parser.parse_args()

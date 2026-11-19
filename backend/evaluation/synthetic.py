@@ -15,23 +15,15 @@ there would be no single correct answer.
 """
 
 import ast
-import re
 import textwrap
 from collections import Counter
 
 from app.search import ChunkRecord
+from app.search.text import first_sentence
 from app.search.tokenizer import tokenize
 
 _FUNCTION_TYPES = {"function", "async_function", "method", "async_method"}
 _MIN_QUERY_WORDS = 4
-_SENTENCE_END = re.compile(r"(?<=[.!?])\s")
-_MARKUP = re.compile(r"``|`|:\w+:|\*\*")
-
-
-def first_sentence(docstring: str) -> str:
-    paragraph = docstring.strip().split("\n\n")[0]
-    sentence = _SENTENCE_END.split(" ".join(paragraph.split()))[0]
-    return _MARKUP.sub("", sentence).strip().rstrip(".")
 
 
 def strip_docstring(record: ChunkRecord) -> ChunkRecord:
